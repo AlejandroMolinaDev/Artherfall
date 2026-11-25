@@ -176,6 +176,9 @@
    - Más tests de regresión de sonido (huellas de RMS por preset) para detectar cambios no deseados.
 
 ## Bugs conocidos / pendientes
+- **Verificar al empezar la próxima sesión** que el CI del commit `f6e1905` (primer build con CLAP activado,
+  `-DAETHERFALL_BUILD_CLAP=ON`) pasó en Linux y Windows. Si CLAP falla en MSVC, desactivarlo en `build.yml` /
+  `release.yml` o arreglarlo (el resto del código ya estaba verde en `f1e9f4d`).
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
   runners macOS para repos privados o hay un límite de gasto). Revisar en GitHub → Settings → Billing, o hacer el
   repo público. Linux/Windows validan igualmente. El workflow de release también necesitará el runner de macOS.
