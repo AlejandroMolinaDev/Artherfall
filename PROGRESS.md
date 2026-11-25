@@ -165,6 +165,18 @@
   real, todos en verde (incluida la ventana abierta en X11 con Xvfb + openbox). CI del commit con CLAP
   (`f6e1905`): Linux y Windows en verde. Captura de la app Standalone real revisada.
 
+## En curso (sesión 2) — AUDITORÍA COMPLETA pedida por el usuario
+Objetivo: depurar y testear TODAS las funciones (DSP de cada módulo + interfaz de cada vista) en suficientes
+casos para considerarlas funcionando. Pasos (marcar al terminar):
+- [ ] A. `tests/AuditTests.cpp`: cada uno de los ~450 parámetros cambia la salida de audio entre dos valores, con
+      el contexto necesario (módulo en la cadena, modo que lo activa, ruta de modulación para LFO/Env/Seq/Chaos).
+      Corregir los parámetros "muertos" que aparezcan.
+- [ ] B. `tests/GuiInteractionTests.cpp`: en cada vista y cada módulo/página MOD, cada widget mueve su parámetro y
+      la automatización del host mueve el widget; slots de la cadena re-enlazados tras reordenar; editores de
+      gate/seq/LFO; filas de la matriz; soltar chips de fuente en knobs; botones de cabecera (undo/redo/A-B/
+      presets); navegador de presets. Corregir lo que falle.
+- [ ] C. Ejecutar todo (`ctest` + host tests con ventanas bajo Xvfb+openbox), commit, push, informe final.
+
 ## A medias
 - Nada a medias en el código.
 
