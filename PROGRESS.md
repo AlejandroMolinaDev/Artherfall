@@ -165,18 +165,24 @@
   real, todos en verde (incluida la ventana abierta en X11 con Xvfb + openbox). CI del commit con CLAP
   (`f6e1905`): Linux y Windows en verde. Captura de la app Standalone real revisada.
 
-## En curso (sesión 2) — AUDITORÍA COMPLETA pedida por el usuario
+## Auditoría completa (sesión 2) — TERMINADA
 Objetivo: depurar y testear TODAS las funciones (DSP de cada módulo + interfaz de cada vista) en suficientes
 casos para considerarlas funcionando. Pasos (marcar al terminar):
 - [x] A. `tests/AuditTests.cpp` (`[audit]`, ~1 min): los 390 parámetros cambian la salida de audio en su
       contexto (módulo en la cadena, modo que lo activa, ruta de modulación) y sus valores extremos dan salida finita
       y bajo 0 dBFS con el limitador. Resultado: 0 parámetros muertos, 0 inestables (los 29 marcados en la primera
       pasada eran errores de contexto del propio test).
-- [ ] B. `tests/GuiInteractionTests.cpp`: en cada vista y cada módulo/página MOD, cada widget mueve su parámetro y
-      la automatización del host mueve el widget; slots de la cadena re-enlazados tras reordenar; editores de
-      gate/seq/LFO; filas de la matriz; soltar chips de fuente en knobs; botones de cabecera (undo/redo/A-B/
-      presets); navegador de presets. Corregir lo que falle.
-- [ ] C. Ejecutar todo (`ctest` + host tests con ventanas bajo Xvfb+openbox), commit, push, informe final.
+- [x] B. `tests/GuiInteractionTests.cpp` (`[gui]`, 9 casos): todos los widgets de MAIN/CORE/OUTPUT, de los 18
+      módulos (panel + slot) y de las 5 páginas MOD × instancias mueven su parámetro, siguen la automatización y
+      vuelven al default con doble clic; los 358 parámetros que no son cantidades de la matriz tienen control en la
+      UI (las 32 cantidades están en las filas de la matriz). Slots: elegir, mover, re-enlace tras mover; editores de
+      gate/secuenciador/forma de LFO; filas de matriz; destinos de macros; chips de fuente → knobs; pestañas al
+      arrastrar; cabecera (pestañas, undo/redo, A/B, presets ◀ ▶, acento por categoría, bypass); navegador de
+      presets (categorías, búsqueda, cargar, favoritos); atajos Ctrl/Cmd+Z; vistas pintando a 75 % y 200 % con
+      audio corriendo. **Bug corregido:** cantidad de destino de macro no se guardaba si se escribía/reseteaba.
+      Capturas de los 18 paneles de módulo revisadas (test oculto "GUI: module panel snapshots").
+- [x] C. `ctest` completo con ventanas reales (Xvfb + openbox): **104/104 tests en verde** (unitarios, auditoría,
+      interfaz y 13 escenarios de host contra el `.vst3`).
 
 ## A medias
 - Nada a medias en el código.

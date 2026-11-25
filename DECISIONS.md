@@ -239,3 +239,14 @@ Formato: fecha · decisión · motivo.
   VST3), el envoltorio VST3 de JUCE desborda su buffer interno (corrupción de heap dentro de JUCE, no en el DSP de
   AETHERFALL, que sí acepta cualquier tamaño de bloque — probado en los tests unitarios). FL Studio respeta el
   máximo en VST3; se deja documentado por si algún host no lo hiciera.
+
+### 2026-11-25 · Auditoría completa (sesión 2)
+- **Decisión:** dos baterías permanentes en `ctest`: `[audit]` (cada parámetro cambia el audio en su contexto y es
+  estable en sus extremos) y `[gui]` (cada widget de cada vista/módulo/página MOD mueve su parámetro y sigue la
+  automatización; cobertura: todos los parámetros tienen control en la UI; cadena, gate, secuenciador, forma de LFO,
+  matriz, macros, chips de fuente, cabecera, navegador de presets, atajos de teclado).
+- **Bug corregido:** en la página MACRO la cantidad de un destino solo se guardaba al terminar un arrastre; escribir
+  el valor, hacer doble clic para resetear o usar la rueda no se guardaba. Ahora también se confirma en
+  `onValueChange` cuando no hay arrastre.
+- **Nota de tests:** los cambios programáticos de un `Slider` no generan gesto (no crean punto de undo); en la UI
+  real el arrastre, el doble clic y la rueda sí lo generan. Los tests simulan el arrastre con eventos de ratón.

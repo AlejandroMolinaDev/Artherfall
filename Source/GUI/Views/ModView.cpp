@@ -308,7 +308,10 @@ namespace
             amount.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 18);
             amount.setRange (-1.0, 1.0, 0.01);
             amount.setDoubleClickReturnValue (true, 0.0);
+            // Commit when a drag ends, and for every change that is not part of a
+            // drag (typed value, double-click reset, mouse wheel).
             amount.onDragEnd = [this] { commit(); };
+            amount.onValueChange = [this] { if (! amount.isMouseButtonDown()) commit(); };
             addAndMakeVisible (amount);
             const auto t = processor.getModRouting().macros[(size_t) macro][(size_t) index];
             dest.setSelectedId (t.dest >= 0 ? t.dest + 2 : 1, juce::dontSendNotification);
