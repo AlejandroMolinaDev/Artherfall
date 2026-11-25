@@ -183,6 +183,9 @@ casos para considerarlas funcionando. Pasos (marcar al terminar):
       Capturas de los 18 paneles de módulo revisadas (test oculto "GUI: module panel snapshots").
 - [x] C. `ctest` completo con ventanas reales (Xvfb + openbox): **104/104 tests en verde** (unitarios, auditoría,
       interfaz y 13 escenarios de host contra el `.vst3`).
+- [x] D. CI de GitHub del commit `bbd3c01`: **Linux y Windows en verde** — compilación (VST3 + CLAP + Standalone),
+      todos los tests (unitarios, `[audit]`, `[gui]`, 13 escenarios de host contra el `.vst3` de Windows) y
+      pluginval nivel 10. macOS sigue sin arrancar (billing de la cuenta).
 
 ## A medias
 - Nada a medias en el código.
