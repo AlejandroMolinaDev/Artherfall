@@ -195,3 +195,18 @@ Formato: fecha · decisión · motivo.
 - **Decisión:** el procesador publica el wet (mono) en un `AbstractFifo` de 8192 muestras; el visualizador de MAIN
   calcula una FFT de 2048 a 30 fps (solo con la vista visible) y dibuja 96 bandas log. Sin OpenGL por ahora.
 - **Motivo:** coste mínimo y cero dependencias; el renderizado OpenGL opcional queda para F10 si hiciera falta.
+
+### 2026-11-25 · Presets (F9)
+- **Decisión:** presets de fábrica como tabla de datos en C++ (solo diferencias respecto a los defaults + cadena +
+  modulación + patrón de gate); al cargar uno se reconstruye el estado completo desde los valores por defecto
+  (`PresetManager::buildFactoryState`) y se aplica como un único paso de undo. Presets de usuario = XML
+  `<AETHERFALL_PRESET name category version>` con el estado completo (sin el nodo `UI`), extensión `.afpreset`,
+  en `Documents/AETHERFALL/Presets`; favoritos en `favourites.xml`. El preset actual (nombre + categoría) se
+  guarda en el nodo `PRESET` del estado. El color de acento de la UI sigue a la categoría.
+- **Motivo:** presets versionables y revisables en el repo, sin ficheros binarios; los de fábrica no dependen del
+  disco; un test garantiza que los 63 cargan y procesan audio limpio.
+
+### 2026-11-25 · Cabecera de dos filas
+- **Decisión:** fila 1 = logo, barra de presets (◀ nombre | categoría ▶), undo/redo, A/B, RAND, bypass; fila 2 =
+  pestañas. Altura de cabecera 84 px (las vistas tienen 556 px a escala 1).
+- **Motivo:** espacio para el navegador de presets sin comprimir las pestañas.

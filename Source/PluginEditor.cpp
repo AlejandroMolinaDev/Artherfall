@@ -4,6 +4,8 @@
 #include "GUI/Views/BasicViews.h"
 #include "GUI/Views/ChainView.h"
 #include "GUI/Views/ModView.h"
+#include "GUI/Views/PresetBrowser.h"
+#include "Presets/PresetManager.h"
 
 namespace aetherfall
 {
@@ -65,6 +67,17 @@ public:
         for (auto* b : { &undoButton, &redoButton, &abButton, &randomButton })
             addAndMakeVisible (*b);
 
+        prevButton.setButtonText (juce::CharPointer_UTF8 ("\xe2\x97\x80"));
+        nextButton.setButtonText (juce::CharPointer_UTF8 ("\xe2\x96\xb6"));
+        prevButton.setTooltip ("Previous preset");
+        nextButton.setTooltip ("Next preset");
+        presetButton.setTooltip ("Browse presets");
+        prevButton.onClick = [this] { editor.getProcessor().getPresetManager().loadPrevious(); update(); };
+        nextButton.onClick = [this] { editor.getProcessor().getPresetManager().loadNext(); update(); };
+        presetButton.onClick = [this] { editor.showPresetBrowser (! editor.isPresetBrowserVisible()); };
+        for (auto* b : { &prevButton, &nextButton, &presetButton })
+            addAndMakeVisible (*b);
+
         bypass = std::make_unique<ToggleSwitch> (apvts, PID::Bypass, "Bypass");
         addAndMakeVisible (*bypass);
         update();
@@ -84,10 +97,11 @@ public:
         g.fillRect (r);
         g.setColour (palette::outline);
         g.drawHorizontalLine (r.getBottom() - 1, 0.0f, (float) r.getWidth());
+        g.drawHorizontalLine (48, 0.0f, (float) r.getWidth());
 
         auto* lf = dynamic_cast<AetherLookAndFeel*> (&getLookAndFeel());
         const auto accent = lf != nullptr ? lf->getAccent() : palette::accentDefault;
-        auto logo = r.removeFromLeft (200).reduced (18, 0);
+        auto logo = r.removeFromTop (48).removeFromLeft (220).reduced (18, 0);
         juce::ColourGradient grad (palette::text, (float) logo.getX(), 0.0f, accent, (float) logo.getRight(), 0.0f, false);
         g.setGradientFill (grad);
         g.setFont (AetherLookAndFeel::font (21.0f, true));
@@ -96,17 +110,25 @@ public:
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (0, 12);
-        r.removeFromLeft (200);
+        // Row 1: logo | preset bar | undo, redo, A/B, RAND, bypass.
+        auto row1 = getLocalBounds().removeFromTop (48).reduced (0, 9);
+        row1.removeFromLeft (230);
+        bypass->setBounds (row1.removeFromRight (108).reduced (6, 0));
+        randomButton.setBounds (row1.removeFromRight (58).reduced (2, 0));
+        abButton.setBounds (row1.removeFromRight (40).reduced (2, 0));
+        redoButton.setBounds (row1.removeFromRight (34).reduced (2, 0));
+        undoButton.setBounds (row1.removeFromRight (34).reduced (2, 0));
+        row1.removeFromRight (16);
+        prevButton.setBounds (row1.removeFromLeft (30).reduced (2, 0));
+        nextButton.setBounds (row1.removeFromRight (30).reduced (2, 0));
+        presetButton.setBounds (row1.reduced (2, 0));
+
+        // Row 2: view tabs, centred.
+        auto row2 = getLocalBounds().withTrimmedTop (48).reduced (0, 5);
+        const int tabW = 116;
+        row2 = row2.withSizeKeepingCentre (tabW * (int) tabs.size(), row2.getHeight());
         for (auto& b : tabs)
-            b.setBounds (r.removeFromLeft (84).reduced (3, 0));
-        r.removeFromLeft (14);
-        undoButton.setBounds (r.removeFromLeft (34).reduced (2, 0));
-        redoButton.setBounds (r.removeFromLeft (34).reduced (2, 0));
-        r.removeFromLeft (6);
-        abButton.setBounds (r.removeFromLeft (44).reduced (2, 0));
-        randomButton.setBounds (r.removeFromLeft (56).reduced (2, 0));
-        bypass->setBounds (r.removeFromRight (104).reduced (6, 0));
+            b.setBounds (row2.removeFromLeft (tabW).reduced (3, 0));
     }
 
 private:
@@ -119,6 +141,7 @@ private:
         redoButton.setEnabled (p.canRedo());
         abButton.setButtonText (p.getABIndex() == 0 ? "A" : "B");
         abButton.setToggleState (p.getABIndex() == 1, juce::dontSendNotification);
+        presetButton.setButtonText (p.getPresetName() + "   |   " + categoryName (p.getPresetCategory()));
     }
 
     void showRandomMenu()
@@ -151,7 +174,7 @@ private:
 
     AetherfallEditor& editor;
     std::array<TabButton, 5> tabs;
-    juce::TextButton undoButton, redoButton, abButton, randomButton;
+    juce::TextButton undoButton, redoButton, abButton, randomButton, prevButton, nextButton, presetButton;
     std::unique_ptr<ToggleSwitch> bypass;
 };
 
@@ -190,15 +213,50 @@ AetherfallEditor::AetherfallEditor (AetherfallProcessor& p)
 
     const float scale = loadScale();
     setSize (juce::roundToInt (baseWidth * scale), juce::roundToInt (baseHeight * scale));
+
+    timerCallback();
+    startTimerHz (4);
+}
+
+void AetherfallEditor::timerCallback()
+{
+    // Accent colour follows the category of the loaded preset.
+    const int cat = (int) processor.getPresetCategory();
+    if (cat != shownCategory)
+    {
+        shownCategory = cat;
+        lookAndFeel.setAccent (cat == (int) PresetCategory::User ? palette::accentDefault
+                                                                  : categoryAccent ((PresetCategory) cat));
+        content.repaint();
+    }
+}
+
+void AetherfallEditor::showPresetBrowser (bool show)
+{
+    if (! show)
+    {
+        presetBrowser.reset();
+        return;
+    }
+    auto browser = std::make_unique<PresetBrowser> (processor);
+    browser->onClose = [this] { juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<AetherfallEditor> (this)]
+                                                                 { if (safe != nullptr) safe->showPresetBrowser (false); }); };
+    content.addAndMakeVisible (*browser);
+    browser->setBounds (0, headerHeight, baseWidth, baseHeight - headerHeight);
+    presetBrowser = std::move (browser);
 }
 
 AetherfallEditor::~AetherfallEditor()
 {
+    stopTimer();
+    presetBrowser.reset();
     setLookAndFeel (nullptr);
 }
 
 void AetherfallEditor::showTab (Tab t)
 {
+    if (presetBrowser != nullptr)
+        showPresetBrowser (false);
     currentTab = t;
     for (size_t i = 0; i < views.size(); ++i)
         views[i]->setVisible ((int) i == (int) t);

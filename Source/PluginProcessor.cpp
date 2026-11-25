@@ -2,6 +2,7 @@
 #include "PluginEditor.h"
 #include "PluginInfo.h"
 #include "DSP/Modules/TranceGate.h"
+#include "Presets/PresetManager.h"
 
 namespace aetherfall
 {
@@ -31,6 +32,38 @@ AetherfallProcessor::~AetherfallProcessor()
     for (auto* p : getParameters())
         p->removeListener (this);
     apvts.state.removeListener (this);
+}
+
+//==============================================================================
+PresetManager& AetherfallProcessor::getPresetManager()
+{
+    if (presetManager == nullptr)
+        presetManager = std::make_unique<PresetManager> (*this);
+    return *presetManager;
+}
+
+void AetherfallProcessor::setPresetInfo (const juce::String& name, PresetCategory category)
+{
+    auto node = apvts.state.getOrCreateChildWithName (presetNodeId, nullptr);
+    node.setProperty ("name", name, nullptr);
+    node.setProperty ("category", categoryName (category), nullptr);
+}
+
+juce::String AetherfallProcessor::getPresetName() const
+{
+    return apvts.state.getChildWithName (presetNodeId).getProperty ("name", "Init").toString();
+}
+
+PresetCategory AetherfallProcessor::getPresetCategory() const
+{
+    return categoryFromName (apvts.state.getChildWithName (presetNodeId).getProperty ("category", "User").toString());
+}
+
+void AetherfallProcessor::loadPresetState (const juce::ValueTree& state, const juce::String& name, PresetCategory category)
+{
+    checkpoint();
+    restoreState (state);
+    setPresetInfo (name, category);
 }
 
 //==============================================================================

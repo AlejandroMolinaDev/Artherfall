@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F8 – GUI avanzada **terminada** → siguiente: **F9 – Presets**.
+- **Fase:** F9 – Presets **terminada** → siguiente: **F10 – Optimización**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -132,36 +132,49 @@
 - **Tests: 77 casos, todos verdes** (+ historial ≥ 50 pasos, A/B independientes, randomize limitado a su sección
   y deshacible, asignación de modulación en slots libres).
 
+- **F9 – Presets:**
+  - `Source/Presets/FactoryPresets.{h,cpp}`: 63 presets (7 × 9 categorías de la spec) como datos; categorías con
+    color de acento. Documentados en `presets/README.md`.
+  - `Source/Presets/PresetManager.{h,cpp}`: factory + usuario (`Documents/AETHERFALL/Presets/*.afpreset`),
+    cargar/guardar/borrar, anterior/siguiente, favoritos, búsqueda y filtro por categoría.
+  - Procesador: `getPresetManager()`, `loadPresetState()`, `setPresetInfo()`, `getPresetName()/Category()`
+    (nodo `PRESET` del estado → se recupera con el proyecto).
+  - GUI: cabecera de 2 filas con barra de presets; `Views/PresetBrowser` (overlay: categorías, favoritos ★,
+    búsqueda, Save As con nombre + categoría, Delete, doble clic carga); acento de color por categoría.
+- **Tests: 82 casos, todos verdes** (+ banco ≥ 60 con rangos válidos y ≥ 5 por categoría, los 63 presets cargan y
+  procesan audio sin NaN y por debajo del ceiling, contenido aplicado (cadena/gate/modulación/defaults), presets de
+  usuario guardar/cargar/favoritos/borrar/anterior/siguiente, nombre del preset guardado con el proyecto).
+
 ## A medias
 - Nada a medias.
 
 ## Siguiente paso exacto
-- **F9 – Presets** (`Source/Presets/`):
-  1. `PresetManager`: carpeta de usuario `Documents/AETHERFALL/Presets` (`juce::File::getSpecialLocation
-     (userDocumentsDirectory)`), formato XML propio = el estado completo (`apvts.copyState()` sin el nodo `UI`)
-     + metadatos (nombre, categoría, autor, favorito); guardar / cargar / borrar / renombrar; anterior/siguiente;
-     búsqueda; favoritos (archivo `favorites.xml`); el preset actual guardado en el estado (nodo `PRESET`).
-  2. `FactoryPresets.{h,cpp}`: ≥ 60 presets definidos como datos (tabla: nombre, categoría, lista de
-     `{PID, valor}`, orden de cadena, rutas de modulación/macros, patrón del gate) en las 9 categorías de la spec;
-     documentarlos en `presets/README.md`. Los de fábrica son de solo lectura y se cargan sin tocar disco.
-  3. GUI: selector de presets en la cabecera (nombre + ◀ ▶ + menú por categorías) y navegador con búsqueda y
-     favoritos (puede ser un overlay sobre la vista actual). Acento de color por categoría
-     (`AetherLookAndFeel::setAccent`).
-  4. Tests: guardar → cargar recupera exactamente el estado, todos los presets de fábrica cargan y procesan audio
-     sin NaN, navegación anterior/siguiente.
+- **F10 – Optimización** (meta: < 8 % de un núcleo a 48 kHz / buffer 256 con preset típico — hoy 4.3 % en el
+  test `[.bench]` de cadena típica; la cadena extrema de 8 módulos pesados da 9.3 %):
+  1. Perfilar con `perf` (`perf record ./build/tests/.../AetherfallTests "[.bench]"`) y atacar los puntos
+     calientes: trig por muestra (ModFX, StereoEngine, DroneGenerator, TapeDelay → osciladores por fasor o tablas),
+     `SpectralFreeze::processFrame` (atan2/sqrt/cos/sin por bin → aproximaciones rápidas), `GranularCloud`
+     (lectura de ventanas), `FDN16` (vectorizar el bucle de 16 líneas con `juce::dsp::SIMDRegister` o
+     auto-vectorización: arrays SoA).
+  2. Parámetro `glob_quality` (Eco / Normal / High): Eco = FDN con 8 líneas activas o sin late-diffusion, shimmer
+     con una sola cabeza, FFT del Spectral a 2048, oversampling del Saturator limitado a 2x; High = oversampling
+     4x, interpolación cúbica en todos los delays modulados.
+  3. Repetir benchmarks (`[.bench]`) y anotar resultados aquí; añadir un test que falle si la cadena típica supera
+     el 8 % en Release (opcional, solo en CI Linux).
+  4. Después: **F11 – QA y entrega** (pluginval nivel 10 en CI ya activo; README de instalación ya existe;
+     GitHub Releases con binarios; CLAP opcional vía `clap-juce-extensions`).
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
   runners macOS para repos privados o hay un límite de gasto). Revisar en GitHub → Settings → Billing, o hacer el
-  repo público. Linux/Windows validan igualmente (último build completo: Linux y Windows en verde con pluginval
-  nivel 10, commit F6).
+  repo público. Linux/Windows validan igualmente (último build completo verificado: Linux y Windows en verde con
+  pluginval nivel 10).
 - pluginval no se puede ejecutar dentro del contenedor de las sesiones de Claude (bloqueado por permisos);
   se valida en CI.
 - Ajustes de sonido pendientes de escucha real (no posible en el contenedor): niveles relativos de los módulos,
-  carácter de los color modes, profundidades máximas de modulación, timbre del Drone y de las texturas.
-- CPU de la cadena extrema 9.3 % (> 8 % objetivo para preset típico; el típico está en 4.3 %). Candidatos F10:
-  trig por muestra en ModFX/Stereo/Drone (usar fasores), Spectral (atan2/sin/cos por bin), Granular (ventanas).
+  carácter de los color modes, profundidades máximas de modulación, timbre del Drone y de las texturas, y el
+  balance de cada preset de fábrica.
 - MIDI CC distintos de CC1 todavía no son fuente (solo mod wheel); añadir "MIDI CC n" configurable si hace falta.
 - GUI: renderizado OpenGL opcional del visualizador no implementado (software, 30 fps, solo visible).
-- Los atajos de teclado dependen de que el host entregue las teclas al plugin (FL suele hacerlo con el editor
-  enfocado).
+- Los atajos de teclado dependen de que el host entregue las teclas al plugin.
+- `glob_quality` existe como parámetro pero aún no cambia nada (F10).

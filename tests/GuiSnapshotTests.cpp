@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets/PresetManager.h"
 
 using namespace aetherfall;
 
@@ -14,13 +15,12 @@ TEST_CASE ("Editor snapshots", "[.gui]")
     p.setPlayConfigDetails (2, 2, 48000.0, 256);
     p.prepareToPlay (48000.0, 256);
 
-    auto order = chain::emptyOrder();
-    order[0] = ModuleType::Granular;
-    order[1] = ModuleType::TapeDelay;
-    order[2] = ModuleType::Filter;
-    order[3] = ModuleType::Gate;
-    order[5] = ModuleType::Saturator;
-    p.setChainOrder (order);
+    // Load a factory preset (sets chain, colours the accent by category).
+    p.getPresetManager().setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("af_snap_presets"));
+    for (size_t i = 0; i < factoryPresets().size(); ++i)
+        if (juce::String (factoryPresets()[i].name) == "Bad Trip Intro")
+            p.getPresetManager().load ((int) i);
+    p.assignModulation (ModSource::Lfo1, PID::CoreSize, 0.4f);
 
     // Some audio so meters and the visualiser have something to show.
     juce::AudioBuffer<float> buf (2, 256);
@@ -58,6 +58,15 @@ TEST_CASE ("Editor snapshots", "[.gui]")
             REQUIRE (png.writeImageToStream (img, out));
         }
     }
+
+    editor->setSize (AetherfallEditor::baseWidth, AetherfallEditor::baseHeight);
+    editor->showPresetBrowser (true);
+    const auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+    const auto file = dir.getChildFile ("gui_presets.png");
+    file.deleteFile();
+    juce::FileOutputStream out (file);
+    juce::PNGImageFormat png;
+    REQUIRE (png.writeImageToStream (img, out));
 }
 
 TEST_CASE ("Editor can be opened, resized and closed repeatedly", "[gui]")

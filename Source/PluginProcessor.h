@@ -14,6 +14,7 @@
 #include "DSP/Modulation/ModulationEngine.h"
 #include "Parameters/ModRoutingState.h"
 #include "Presets/StateHistory.h"
+#include "Presets/FactoryPresets.h"
 #include "DSP/Utils/Smoothers.h"
 #include "DSP/Utils/DelayLine.h"
 
@@ -123,6 +124,15 @@ public:
         analyser (GUI thread; lock-free single reader). */
     int readSpectrumSamples (float* dest, int max) noexcept;
 
+    //==========================================================================
+    // Presets (message thread).
+    class PresetManager& getPresetManager();
+    void loadPresetState (const juce::ValueTree& state, const juce::String& name, PresetCategory category);
+    void setPresetInfo (const juce::String& name, PresetCategory category);
+    juce::String getPresetName() const;
+    PresetCategory getPresetCategory() const;
+    static inline const juce::Identifier presetNodeId { "PRESET" };
+
     /** Level meters and gain reductions (GUI). */
     const Meters& getMeters() const noexcept { return meters; }
 
@@ -163,7 +173,8 @@ private:
     /** Effective (modulated) parameter values for the current chunk. */
     std::array<float, (size_t) numParams> effective {};
 
-    // --- Undo / A-B (message thread) -------------------------------------------
+    // --- Presets / Undo / A-B (message thread) ---------------------------------
+    std::unique_ptr<class PresetManager> presetManager;
     StateHistory history;
     std::array<juce::ValueTree, 2> abStates;
     int abIndex = 0;

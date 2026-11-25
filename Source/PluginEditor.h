@@ -20,7 +20,8 @@ class AetherfallProcessor;
     state (UI node) and restored when the editor reopens.
 */
 class AetherfallEditor final : public juce::AudioProcessorEditor,
-                               public juce::DragAndDropContainer
+                               public juce::DragAndDropContainer,
+                               private juce::Timer
 {
 public:
     explicit AetherfallEditor (AetherfallProcessor&);
@@ -32,7 +33,7 @@ public:
 
     AetherfallProcessor& getProcessor() noexcept { return processor; }
 
-    static constexpr int baseWidth = 1000, baseHeight = 640, headerHeight = 56;
+    static constexpr int baseWidth = 1000, baseHeight = 640, headerHeight = 84;
 
     enum class Tab { Main = 0, Chain, Core, Mod, Output };
     void showTab (Tab);
@@ -41,8 +42,12 @@ public:
     /** The scaled content (exposed for snapshot tests). */
     juce::Component& getContent() noexcept { return content; }
 
+    void showPresetBrowser (bool show);
+    bool isPresetBrowserVisible() const noexcept { return presetBrowser != nullptr; }
+
 private:
     class Header;
+    void timerCallback() override;
     void saveScale (float scale);
     float loadScale() const;
 
@@ -54,6 +59,8 @@ private:
     std::unique_ptr<Header> header;
     std::array<std::unique_ptr<juce::Component>, 5> views;
     Tab currentTab = Tab::Main;
+    std::unique_ptr<juce::Component> presetBrowser;
+    int shownCategory = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AetherfallEditor)
 };
