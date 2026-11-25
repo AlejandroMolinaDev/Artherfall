@@ -1,0 +1,26 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+out/
+.cache/
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+xcuserdata/
+*.xcworkspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local JUCE checkout (use FetchContent or a submodule instead of committing it)
+libs/JUCE/
+
+# pluginval output
+pluginval-logs/
+*.log
