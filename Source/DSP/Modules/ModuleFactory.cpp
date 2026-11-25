@@ -5,6 +5,12 @@
 #include "FilterSweep.h"
 #include "Saturator.h"
 #include "StereoEngine.h"
+#include "Bitcrush.h"
+#include "RingFreq.h"
+#include "ModFX.h"
+#include "ShimmerDelay.h"
+#include "MultiTap.h"
+#include "Comb.h"
 
 namespace aetherfall
 {
@@ -37,16 +43,16 @@ std::unique_ptr<IModule> createModule (ModuleType type)
         case ModuleType::Filter:     return std::make_unique<FilterSweep>();
         case ModuleType::Saturator:  return std::make_unique<Saturator>();
         case ModuleType::Stereo:     return std::make_unique<StereoEngine>();
+        case ModuleType::Bitcrush:   return std::make_unique<Bitcrush>();
+        case ModuleType::RingFreq:   return std::make_unique<RingFreq>();
+        case ModuleType::ModFX:      return std::make_unique<ModFX>();
+        case ModuleType::ShimmerDelay: return std::make_unique<ShimmerDelay>();
+        case ModuleType::MultiTap:   return std::make_unique<MultiTap>();
+        case ModuleType::Comb:       return std::make_unique<Comb>();
 
         case ModuleType::Spectral:
-        case ModuleType::ShimmerDelay:
-        case ModuleType::MultiTap:
         case ModuleType::Drone:
         case ModuleType::Resonator:
-        case ModuleType::Comb:
-        case ModuleType::ModFX:
-        case ModuleType::Bitcrush:
-        case ModuleType::RingFreq:
         case ModuleType::Gate:
         case ModuleType::ReverseSwell:
         case ModuleType::Texture:
@@ -62,7 +68,8 @@ bool isModuleImplemented (ModuleType type) noexcept
 {
     constexpr ModuleType implemented[] = {
         ModuleType::Granular, ModuleType::TapeDelay, ModuleType::Filter,
-        ModuleType::Saturator, ModuleType::Stereo
+        ModuleType::Saturator, ModuleType::Stereo, ModuleType::Bitcrush, ModuleType::RingFreq,
+        ModuleType::ModFX, ModuleType::ShimmerDelay, ModuleType::MultiTap, ModuleType::Comb
     };
 
     for (auto t : implemented)

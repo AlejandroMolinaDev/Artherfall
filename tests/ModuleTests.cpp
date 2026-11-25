@@ -216,3 +216,140 @@ TEST_CASE ("Granular Cloud: makes a cloud, respects the voice limit, freeze scan
                [&] (int, float l, float) { out.push_back (l); });
     REQUIRE (rms (out, 48000) > 0.05);
 }
+
+namespace
+{
+    std::vector<float> runImpulse (ModuleType type, ParamSet& ps, int numSamples)
+    {
+        auto m = createModule (type);
+        m->prepare (48000.0, 64, 2);
+        std::vector<float> out;
+        runModule (*m, ps, 48000.0, numSamples, [] (int n) { return n == 0 ? 1.0f : 0.0f; },
+                   [&] (int, float l, float r) { out.push_back (0.5f * (l + r)); });
+        return out;
+    }
+
+    /** Estimated frequency from zero crossings after a warm-up. */
+    double zeroCrossingFrequency (const std::vector<float>& x, size_t from, double sr)
+    {
+        int crossings = 0;
+        for (size_t i = from + 1; i < x.size(); ++i)
+            if ((x[i - 1] < 0.0f) != (x[i] < 0.0f))
+                ++crossings;
+        return crossings / 2.0 / ((double) (x.size() - from) / sr);
+    }
+}
+
+TEST_CASE ("Bitcrush: transparent at 16 bit / full rate, crunchy at low settings", "[modules]")
+{
+    auto m = createModule (ModuleType::Bitcrush);
+    m->prepare (48000.0, 64, 2);
+
+    auto errorFor = [&] (float bits, float rate)
+    {
+        ParamSet ps;
+        ps.set (PID::CrushBits, bits).set (PID::CrushRate, rate).set (PID::CrushSmooth, 0.0f).set (PID::CrushJitter, 0.0f);
+        m->reset();
+        std::vector<float> in, out;
+        runModule (*m, ps, 48000.0, 9600,
+                   [&] (int n) { const float x = 0.5f * std::sin (0.0288f * (float) n); in.push_back (x); return x; },
+                   [&] (int, float l, float) { out.push_back (l); });
+        double err = 0.0;
+        for (size_t i = 4800; i < in.size(); ++i)
+            err = std::max (err, (double) std::abs (in[i] - out[i]));
+        return err;
+    };
+
+    REQUIRE (errorFor (16.0f, 48000.0f) < 1.0e-4);
+    REQUIRE (errorFor (4.0f, 48000.0f) > 0.02);
+    REQUIRE (errorFor (16.0f, 2000.0f) > 0.02);
+}
+
+TEST_CASE ("Frequency shifter moves a sine by the shift amount", "[modules]")
+{
+    auto m = createModule (ModuleType::RingFreq);
+    m->prepare (48000.0, 64, 2);
+    ParamSet ps;
+    ps.set (PID::RingMode, 1.0f).set (PID::RingShift, 200.0f).set (PID::RingFeedback, 0.0f).set (PID::RingStereo, 0.0f);
+
+    std::vector<float> out;
+    runModule (*m, ps, 48000.0, 48000, [] (int n) { return 0.5f * std::sin (2.0f * 3.14159265f * 1000.0f * (float) n / 48000.0f); },
+               [&] (int, float l, float) { out.push_back (l); });
+
+    const double f = zeroCrossingFrequency (out, 4800, 48000.0);
+    INFO ("measured " << f << " Hz");
+    REQUIRE (std::abs (f - 1200.0) < 15.0);
+}
+
+TEST_CASE ("Shimmer Delay: first echo on time", "[modules]")
+{
+    ParamSet ps;
+    ps.set (PID::ShdlySync, 0.0f).set (PID::ShdlyTime, 250.0f).set (PID::ShdlyPingPong, 0.0f)
+      .set (PID::ShdlyLPF, 20000.0f).set (PID::ShdlyHPF, 20.0f);
+    const auto out = runImpulse (ModuleType::ShimmerDelay, ps, 24000);
+
+    size_t peak = 0;
+    for (size_t i = 0; i < out.size(); ++i)
+        if (std::abs (out[i]) > std::abs (out[peak])) peak = i;
+    INFO ("peak at " << peak);
+    REQUIRE (std::abs ((int) peak - 12000) <= 3);
+}
+
+TEST_CASE ("Multi-Tap: taps land on the expected grid", "[modules]")
+{
+    ParamSet ps;
+    ps.set (PID::MtapSync, 0.0f).set (PID::MtapTime, 400.0f).set (PID::MtapTaps, 4.0f).set (PID::MtapShape, 0.0f)
+      .set (PID::MtapDiffusion, 0.0f).set (PID::MtapFeedback, 0.0f).set (PID::MtapTone, 20000.0f).set (PID::MtapWidth, 0.0f);
+    const auto out = runImpulse (ModuleType::MultiTap, ps, 24000);
+
+    for (int k = 1; k <= 4; ++k)
+    {
+        const int expected = k * 4800;   // 100 ms grid
+        float local = 0.0f;
+        for (int i = expected - 300; i < expected + 300; ++i)
+            local = std::max (local, std::abs (out[(size_t) i]));
+        INFO ("tap " << k);
+        REQUIRE (local > 0.1f);
+    }
+    // Nothing between the taps.
+    float between = 0.0f;
+    for (int i = 6800; i < 8800; ++i)
+        between = std::max (between, std::abs (out[(size_t) i]));
+    REQUIRE (between < 0.02f);
+}
+
+TEST_CASE ("Comb rings at its tuned period", "[modules]")
+{
+    ParamSet ps;
+    ps.set (PID::CombFreq, 200.0f).set (PID::CombFeedback, 0.9f).set (PID::CombDamp, 0.0f)
+      .set (PID::CombSmear, 0.0f).set (PID::CombModDepth, 0.0f).set (PID::CombSpread, 0.0f);
+    const auto out = runImpulse (ModuleType::Comb, ps, 4800);
+
+    // Echoes every 240 samples (48000 / 200).
+    for (int k = 1; k <= 4; ++k)
+    {
+        const int at = k * 240;
+        float local = 0.0f;
+        for (int i = at - 3; i <= at + 3; ++i)
+            local = std::max (local, std::abs (out[(size_t) i]));
+        INFO ("echo " << k);
+        REQUIRE (local > 0.05f);
+    }
+}
+
+TEST_CASE ("ModFX: every mode produces a signal", "[modules]")
+{
+    auto m = createModule (ModuleType::ModFX);
+    m->prepare (48000.0, 64, 2);
+    for (int mode = 0; mode < 3; ++mode)
+    {
+        ParamSet ps;
+        ps.set (PID::MfxMode, (float) mode);
+        m->reset();
+        std::vector<float> out;
+        runModule (*m, ps, 48000.0, 24000, [] (int n) { return 0.5f * std::sin (0.0288f * (float) n); },
+                   [&] (int, float l, float) { out.push_back (l); });
+        INFO ("mode " << mode);
+        REQUIRE (rms (out, 12000) > 0.1);
+    }
+}
