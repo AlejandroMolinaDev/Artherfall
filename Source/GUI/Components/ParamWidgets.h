@@ -34,7 +34,9 @@ protected:
     the name while hovering or dragging. Double-click = default value,
     Ctrl/Cmd-drag = fine, tooltip with name and value.
 */
-class Knob final : public ParamWidget
+class Knob final : public ParamWidget,
+                   public juce::DragAndDropTarget,
+                   private juce::Timer
 {
 public:
     enum class Size { Small, Normal, Macro };
@@ -46,6 +48,15 @@ public:
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void paintOverChildren (juce::Graphics&) override;
+    void visibilityChanged() override;
+
+    // Drop a modulation source chip ("modsrc:<id>") on the knob to modulate it.
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override { dropHover = true; repaint(); }
+    void itemDragExit (const SourceDetails&) override  { dropHover = false; repaint(); }
+    void itemDropped (const SourceDetails&) override;
 
     juce::Slider& getSlider() noexcept { return slider; }
     Size getSize() const noexcept { return size; }
@@ -59,7 +70,11 @@ private:
     Size size;
     juce::String label, valueText;
     juce::Rectangle<int> textArea;
-    bool showValue = false;
+    bool showValue = false, dropHover = false;
+    float shownOffset = 0.0f;
+
+    void timerCallback() override;
+    void showContextMenu();
 };
 
 /** Combo box bound to a choice parameter, with a small caption. */

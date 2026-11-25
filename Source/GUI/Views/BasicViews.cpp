@@ -30,7 +30,7 @@ std::vector<juce::Component*> ParamView::widgetsOf (const Section& s) const
 //==============================================================================
 MainView::MainView (AetherfallProcessor& p, juce::AudioProcessorValueTreeState& s)
     : ParamView (s),
-      atmosphere (p.getMeters()),
+      atmosphere (p, p.getMeters()),
       inMeter (p.getMeters().inPeakL, p.getMeters().inPeakR, p.getMeters().inRmsL, p.getMeters().inRmsR, "IN"),
       outMeter (p.getMeters().outPeakL, p.getMeters().outPeakR, p.getMeters().outRmsL, p.getMeters().outRmsR, "OUT")
 {

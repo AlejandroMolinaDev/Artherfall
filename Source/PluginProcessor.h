@@ -119,6 +119,10 @@ public:
     enum class RandomSection { Core, Chain, Modulation, Output };
     void randomize (RandomSection section, float intensity, std::uint32_t seed);
 
+    /** Pops up to `max` mono samples of the wet signal for the spectrum
+        analyser (GUI thread; lock-free single reader). */
+    int readSpectrumSamples (float* dest, int max) noexcept;
+
     /** Level meters and gain reductions (GUI). */
     const Meters& getMeters() const noexcept { return meters; }
 
@@ -170,6 +174,11 @@ private:
     ModulationEngine modEngine;
     juce::SpinLock routingWriteLock;   // writer side only (never taken on the audio thread)
     std::array<std::array<float, controlBlockSize>, 2> lastWet {};
+
+    // Wet signal for the GUI spectrum analyser (single producer / consumer).
+    static constexpr int spectrumFifoSize = 8192;
+    juce::AbstractFifo spectrumFifo { spectrumFifoSize };
+    std::array<float, spectrumFifoSize> spectrumBuffer {};
     int lastWetLength = 0;
 
     // --- DSP stages -----------------------------------------------------------

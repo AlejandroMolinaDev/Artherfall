@@ -175,3 +175,23 @@ Formato: fecha · decisión · motivo.
   (`AETHERFALL_SNAPSHOT_DIR=... AetherfallTests "[.gui]"`); un test normal `[gui]` abre/redimensiona/cierra el
   editor varias veces.
 - **Motivo:** el contenedor de desarrollo no tiene display; así se puede revisar el diseño en cada sesión.
+
+### 2026-11-25 · Undo/redo por instantáneas, no con `juce::UndoManager` en el APVTS
+- **Decisión:** `StateHistory` guarda una copia del estado completo ANTES de cada gesto de UI (vía
+  `AudioProcessorParameter::Listener::parameterGestureChanged`) y antes de cada edición de estado (cadena,
+  matriz, macros, gate, secuencias, formas de LFO). 100 pasos. El APVTS sigue sin UndoManager.
+- **Motivo:** con un UndoManager en el APVTS la automatización del host también se grabaría en el historial
+  (el APVTS vuelca los parámetros al árbol con el UndoManager). Así solo se deshace lo que hizo el usuario.
+
+### 2026-11-25 · Modulación desde la UI (F8)
+- **Decisión:** las fuentes son "chips" arrastrables (vista MOD); los knobs aceptan el drop (`modsrc:<id>`) y
+  asignan el primer slot libre de la matriz (cantidad 50 %). Las pestañas se abren al pasar por encima durante el
+  arrastre, para soltar sobre knobs de cualquier vista. Clic derecho en un knob: "Modulate with ▸", "Remove
+  modulation", "Reset". Anillo naranja en tiempo real = desplazamiento de modulación actual (offset publicado por
+  el `ModulationEngine` en atomics).
+- **Motivo:** flujo estilo Serum/Vital con una GUI de pestañas; el menú contextual cubre el caso sin arrastre.
+
+### 2026-11-25 · Analizador de espectro y visualizador por software
+- **Decisión:** el procesador publica el wet (mono) en un `AbstractFifo` de 8192 muestras; el visualizador de MAIN
+  calcula una FFT de 2048 a 30 fps (solo con la vista visible) y dibuja 96 bandas log. Sin OpenGL por ahora.
+- **Motivo:** coste mínimo y cero dependencias; el renderizado OpenGL opcional queda para F10 si hiciera falta.

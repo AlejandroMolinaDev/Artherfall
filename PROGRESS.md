@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F7 – GUI base **terminada** → siguiente: **F8 – GUI avanzada**.
+- **Fase:** F8 – GUI avanzada **terminada** → siguiente: **F9 – Presets**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -118,31 +118,43 @@
 - **Tests: 72 casos, todos verdes** (+ editor abre/redimensiona/cierra y recuerda la escala). Capturas: test
   oculto `[.gui]`.
 
+- **F8 – GUI avanzada:**
+  - Procesador: `Source/Presets/StateHistory` (undo/redo por instantáneas, 100 pasos, solo acciones de usuario),
+    `undo()/redo()`, A/B (`toggleAB()`, `copyCurrentToOtherAB()`), `randomize(section, intensity, seed)`,
+    `assignModulation()/removeModulation()`, `getModOffset()`, FIFO de espectro (`readSpectrumSamples()`).
+  - `Views/ModView`: páginas LFO (con vista de forma y editor de puntos custom) / ENV / SEQ (barras editables) /
+    CHAOS / MACRO (knob + 8 destinos con cantidad), matriz de 32 filas (fuente, destino agrupado por sección,
+    cantidad, curva, vía, borrar) sincronizada con el estado, barra de chips de fuentes arrastrables.
+  - `Knob`: drop de fuentes, menú contextual (modular con / quitar / reset), anillo de modulación en vivo.
+  - Cabecera: Undo / Redo (+ Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y), A/B (clic derecho = copiar al otro),
+    RAND (sección × Subtle/Medium/Wild), pestañas que se abren al arrastrar una fuente encima.
+  - Visualizador de MAIN con curva de espectro del wet superpuesta.
+- **Tests: 77 casos, todos verdes** (+ historial ≥ 50 pasos, A/B independientes, randomize limitado a su sección
+  y deshacible, asignación de modulación en slots libres).
+
 ## A medias
 - Nada a medias.
 
 ## Siguiente paso exacto
-- **F8 – GUI avanzada**:
-  1. `Views/ModView`: editores de LFO (forma, rate/sync/div, fase, retrig, polaridad, smooth; editor de puntos de
-     la forma custom → `setLfoShape()`), envolventes, secuenciadores (barras editables → `setSeqSteps()`), chaos,
-     macros (lista de destinos/cantidades → `setMacroTarget()`), matriz de 32 slots (fuente, destino, cantidad,
-     curva, vía → `setModSlot()`).
-  2. Drag & drop de fuentes a knobs (estilo Serum/Vital): las fuentes son `DragAndDropContainer` sources; el
-     `Knob` acepta el drop y asigna el primer slot libre de la matriz con cantidad por defecto; anillo de color
-     alrededor del knob con la cantidad y el valor modulado en tiempo real (leer el valor efectivo: exponer un
-     array atómico de valores efectivos desde `ModulationEngine`).
-  3. Undo/Redo (≥ 50 pasos): `juce::UndoManager` en el procesador pasado al APVTS (hoy `nullptr`) y a los writers
-     de estado (`setChainOrder`, `setModSlot`... ya aceptan `UndoManager*`), botones en la cabecera + Ctrl/Cmd+Z.
-  4. A/B: dos copias del estado completo, botón A/B y "copiar A→B".
-  5. Randomize inteligente por sección con intensidad.
-  6. Visualizador mejorado (granos como puntos del Granular, decay como niebla) + analizador de espectro del wet
-     (FIFO lock-free desde el procesador + FFT en el hilo de mensajes).
-  7. Revisar fps (< 60), sin fugas al abrir/cerrar (leak detector en Debug).
+- **F9 – Presets** (`Source/Presets/`):
+  1. `PresetManager`: carpeta de usuario `Documents/AETHERFALL/Presets` (`juce::File::getSpecialLocation
+     (userDocumentsDirectory)`), formato XML propio = el estado completo (`apvts.copyState()` sin el nodo `UI`)
+     + metadatos (nombre, categoría, autor, favorito); guardar / cargar / borrar / renombrar; anterior/siguiente;
+     búsqueda; favoritos (archivo `favorites.xml`); el preset actual guardado en el estado (nodo `PRESET`).
+  2. `FactoryPresets.{h,cpp}`: ≥ 60 presets definidos como datos (tabla: nombre, categoría, lista de
+     `{PID, valor}`, orden de cadena, rutas de modulación/macros, patrón del gate) en las 9 categorías de la spec;
+     documentarlos en `presets/README.md`. Los de fábrica son de solo lectura y se cargan sin tocar disco.
+  3. GUI: selector de presets en la cabecera (nombre + ◀ ▶ + menú por categorías) y navegador con búsqueda y
+     favoritos (puede ser un overlay sobre la vista actual). Acento de color por categoría
+     (`AetherLookAndFeel::setAccent`).
+  4. Tests: guardar → cargar recupera exactamente el estado, todos los presets de fábrica cargan y procesan audio
+     sin NaN, navegación anterior/siguiente.
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
   runners macOS para repos privados o hay un límite de gasto). Revisar en GitHub → Settings → Billing, o hacer el
-  repo público. Linux/Windows validan igualmente.
+  repo público. Linux/Windows validan igualmente (último build completo: Linux y Windows en verde con pluginval
+  nivel 10, commit F6).
 - pluginval no se puede ejecutar dentro del contenedor de las sesiones de Claude (bloqueado por permisos);
   se valida en CI.
 - Ajustes de sonido pendientes de escucha real (no posible en el contenedor): niveles relativos de los módulos,
@@ -150,4 +162,6 @@
 - CPU de la cadena extrema 9.3 % (> 8 % objetivo para preset típico; el típico está en 4.3 %). Candidatos F10:
   trig por muestra en ModFX/Stereo/Drone (usar fasores), Spectral (atan2/sin/cos por bin), Granular (ventanas).
 - MIDI CC distintos de CC1 todavía no son fuente (solo mod wheel); añadir "MIDI CC n" configurable si hace falta.
-- GUI: el selector de presets de la cabecera llega en F9; la vista MOD es un placeholder hasta F8.
+- GUI: renderizado OpenGL opcional del visualizador no implementado (software, 30 fps, solo visible).
+- Los atajos de teclado dependen de que el host entregue las teclas al plugin (FL suele hacerlo con el editor
+  enfocado).

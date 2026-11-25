@@ -19,7 +19,8 @@ class AetherfallProcessor;
     vector-sharp from 75 % to 200 %. The chosen scale is saved in the plug-in
     state (UI node) and restored when the editor reopens.
 */
-class AetherfallEditor final : public juce::AudioProcessorEditor
+class AetherfallEditor final : public juce::AudioProcessorEditor,
+                               public juce::DragAndDropContainer
 {
 public:
     explicit AetherfallEditor (AetherfallProcessor&);
@@ -27,6 +28,9 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+    AetherfallProcessor& getProcessor() noexcept { return processor; }
 
     static constexpr int baseWidth = 1000, baseHeight = 640, headerHeight = 56;
 

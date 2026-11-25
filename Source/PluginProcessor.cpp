@@ -555,6 +555,18 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
         std::copy_n (chunk.getReadPointer (ch), length, lastWet[(size_t) ch].data());
     lastWetLength = length;
 
+    // Feed the spectrum analyser (dropped silently when the GUI is not reading).
+    {
+        const auto scope = spectrumFifo.write (length);
+        auto put = [this] (int startIndex, int count, int offset)
+        {
+            for (int i = 0; i < count; ++i)
+                spectrumBuffer[(size_t) (startIndex + i)] = 0.5f * (lastWet[0][(size_t) (offset + i)] + lastWet[1][(size_t) (offset + i)]);
+        };
+        put (scope.startIndex1, scope.blockSize1, 0);
+        put (scope.startIndex2, scope.blockSize2, scope.blockSize1);
+    }
+
     // The chain latency may change when its order changes (Spectral added or
     // removed). Applied from the next chunk on.
     updateLatency (chain.getLatencySamples());
@@ -562,6 +574,14 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     // 6) Output stage: wet processing, ducking, dry/wet, clipper, gain,
     //    safety limiter, bypass and output meters.
     outputStage.process (chunk, dryChunk[0].data(), dryChunk[1].data(), ctx, &meters);
+}
+
+int AetherfallProcessor::readSpectrumSamples (float* dest, int max) noexcept
+{
+    const auto scope = spectrumFifo.read (std::min (max, spectrumFifo.getNumReady()));
+    for (int i = 0; i < scope.blockSize1; ++i) dest[i] = spectrumBuffer[(size_t) (scope.startIndex1 + i)];
+    for (int i = 0; i < scope.blockSize2; ++i) dest[scope.blockSize1 + i] = spectrumBuffer[(size_t) (scope.startIndex2 + i)];
+    return scope.blockSize1 + scope.blockSize2;
 }
 
 //==============================================================================

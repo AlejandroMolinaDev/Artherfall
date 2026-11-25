@@ -1,5 +1,6 @@
 #include "ParamWidgets.h"
 #include "GUI/LookAndFeel/AetherLookAndFeel.h"
+#include "PluginProcessor.h"
 
 namespace aetherfall
 {
@@ -12,6 +13,13 @@ namespace
     }
 
     juce::String paramId (PID pid) { return juce::String (std::string (info (pid).id)); }
+
+    AetherfallProcessor* findProcessor (const juce::Component& c)
+    {
+        if (auto* ed = c.findParentComponentOfClass<juce::AudioProcessorEditor>())
+            return dynamic_cast<AetherfallProcessor*> (ed->getAudioProcessor());
+        return nullptr;
+    }
 }
 
 juce::String shortLabel (PID pid)
@@ -24,6 +32,15 @@ juce::String shortLabel (PID pid)
     for (auto* p : prefixes)
         if (name.startsWith (p) && name.length() > (int) std::strlen (p))
             return name.substring ((int) std::strlen (p));
+
+    // Numbered modulators: "LFO3 Rate" -> "Rate", "Env2 Attack" -> "Attack".
+    for (auto* p : { "LFO", "Env", "Seq", "Chaos", "Mod" })
+        if (name.startsWith (p))
+        {
+            const auto rest = name.substring ((int) std::strlen (p));
+            if (rest.isNotEmpty() && juce::CharacterFunctions::isDigit (rest[0]) && rest.containsChar (' '))
+                return rest.fromFirstOccurrenceOf (" ", false, false);
+        }
     return name;
 }
 
@@ -82,6 +99,116 @@ void Knob::refreshText()
         valueText = param->getCurrentValueAsText();
     slider.setTooltip (juce::String (std::string (info (pid).name)) + ": " + valueText);
     repaint();
+}
+
+void Knob::visibilityChanged()
+{
+    // Modulation rings only need refreshing while the knob is on screen.
+    if (isShowing() && info (pid).isModulatable())
+        startTimerHz (25);
+    else
+        stopTimer();
+}
+
+void Knob::timerCallback()
+{
+    if (auto* proc = findProcessor (*this))
+    {
+        const float off = proc->getModOffset (pid);
+        if (std::abs (off - shownOffset) > 1.0e-3f || (std::abs (off) > 1.0e-4f) != (std::abs (shownOffset) > 1.0e-4f))
+        {
+            shownOffset = off;
+            repaint();
+        }
+    }
+}
+
+void Knob::paintOverChildren (juce::Graphics& g)
+{
+    const auto b = slider.getBounds().toFloat().reduced (size == Size::Macro ? 6.0f : 3.0f);
+    const float radius = std::min (b.getWidth(), b.getHeight()) * 0.5f;
+    const auto c = b.getCentre();
+    constexpr float start = juce::MathConstants<float>::pi * 1.25f, end = juce::MathConstants<float>::pi * 2.75f;
+
+    if (dropHover)
+    {
+        g.setColour (palette::warm.withAlpha (0.8f));
+        g.drawEllipse (b.expanded (2.0f), 2.0f);
+    }
+
+    if (std::abs (shownOffset) > 1.0e-4f && param != nullptr)
+    {
+        // Arc from the knob value to the modulated value + a dot (live).
+        const float base = param->getValue();
+        const float mod = juce::jlimit (0.0f, 1.0f, base + shownOffset);
+        const float a0 = start + base * (end - start), a1 = start + mod * (end - start);
+        const float r = radius + 2.5f;
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, r, r, 0.0f, std::min (a0, a1), std::max (a0, a1), true);
+        g.setColour (palette::warm);
+        g.strokePath (arc, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ c.x + std::sin (a1) * r, c.y - std::cos (a1) * r }));
+    }
+}
+
+bool Knob::isInterestedInDragSource (const SourceDetails& d)
+{
+    return info (pid).isModulatable() && d.description.toString().startsWith ("modsrc:");
+}
+
+void Knob::itemDropped (const SourceDetails& d)
+{
+    dropHover = false;
+    if (auto* proc = findProcessor (*this))
+    {
+        const auto id = d.description.toString().fromFirstOccurrenceOf ("modsrc:", false, false);
+        proc->assignModulation (sourceFromId (id.toStdString()), pid);
+    }
+    repaint();
+}
+
+void Knob::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        showContextMenu();
+}
+
+void Knob::showContextMenu()
+{
+    auto* proc = findProcessor (*this);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (juce::String (std::string (info (pid).name)));
+    menu.addItem (1, "Reset to default");
+
+    if (proc != nullptr && info (pid).isModulatable())
+    {
+        juce::PopupMenu sources;
+        for (int s = 1; s < numModSources; ++s)
+            sources.addItem (100 + s, juce::String (std::string (sourceNames[(size_t) s])));
+        menu.addSubMenu ("Modulate with", sources);
+        menu.addItem (2, "Remove modulation", std::abs (proc->getModOffset (pid)) > 1.0e-6f
+                                               || [&] { for (auto& sl : proc->getModRouting().slots) if (sl.dest == (std::int16_t) pid) return true; return false; }());
+    }
+
+    juce::Component::SafePointer<Knob> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&slider), [safe, proc] (int result)
+    {
+        if (safe == nullptr || result == 0)
+            return;
+        if (result == 1)
+        {
+            if (auto* p = safe->param)
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->getDefaultValue());
+                p->endChangeGesture();
+            }
+        }
+        else if (result == 2 && proc != nullptr)
+            proc->removeModulation (safe->pid);
+        else if (result >= 100 && proc != nullptr)
+            proc->assignModulation ((ModSource) (result - 100), safe->pid);
+    });
 }
 
 void Knob::mouseEnter (const juce::MouseEvent&) { showValue = true; refreshText(); }
