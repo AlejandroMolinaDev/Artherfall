@@ -469,3 +469,65 @@ TEST_CASE ("Resonator Bank rings after an impulse", "[modules]")
     for (float v : out) peak = std::max (peak, std::abs (v));
     REQUIRE (peak < 4.0f);
 }
+
+#include "DSP/Modules/DroneGenerator.h"
+#include "DSP/Modules/SpectralFreeze.h"
+
+TEST_CASE ("Spectral: neutral settings reproduce the input delayed by the latency", "[modules][spectral]")
+{
+    for (float fftChoice : { 0.0f, 1.0f })
+    {
+        SpectralFreeze spec;
+        spec.prepare (48000.0, 64, 2);
+        REQUIRE (spec.getLatencySamples() == 4096);
+
+        ParamSet ps;
+        ps.set (PID::SpecFFT, fftChoice).set (PID::SpecSmear, 0.0f).set (PID::SpecBlur, 0.0f)
+          .set (PID::SpecShimmer, 0.0f).set (PID::SpecPhaseRand, 0.0f).set (PID::SpecTilt, 0.0f)
+          .set (PID::SpecFreeze, 0.0f);
+
+        auto input = [] (int n) { return 0.5f * std::sin (2.0f * 3.14159265f * 440.0f * (float) n / 48000.0f); };
+        float maxErr = 0.0f;
+        runModule (spec, ps, 48000.0, 48000, input,
+                   [&] (int n, float l, float) { if (n > 12000) maxErr = std::max (maxErr, std::abs (l - input (n - 4096))); });
+        INFO ("fft choice " << fftChoice << " max error " << maxErr);
+        REQUIRE (maxErr < 2.0e-3f);
+    }
+}
+
+TEST_CASE ("Spectral freeze keeps sounding after the input stops", "[modules][spectral]")
+{
+    SpectralFreeze spec;
+    spec.prepare (48000.0, 64, 2);
+    ParamSet ps;
+    dsp::Random32 rng (4);
+    std::vector<float> out;
+    runModule (spec, ps, 48000.0, 48000 * 3,
+               [&] (int n) { return n < 48000 ? 0.4f * rng.nextBipolar() : 0.0f; },
+               [&] (int, float l, float) { out.push_back (l); },
+               [&] (int n) { ps.set (PID::SpecFreeze, n >= 40000 ? 1.0f : 0.0f); });
+    std::vector<float> late (out.begin() + 48000 * 2, out.end());
+    REQUIRE (rms (late) > 0.01);
+}
+
+TEST_CASE ("Drone follows the input pitch and sustains", "[modules][drone]")
+{
+    DroneGenerator drone;
+    drone.prepare (48000.0, 64, 2);
+
+    ParamSet ps;
+    ps.set (PID::DroneOctave, 1.0f)          // -1 octave
+      .set (PID::DroneQuantize, 1.0f).set (PID::GlobKey, 9.0f).set (PID::GlobScale, 1.0f)  // A minor
+      .set (PID::DroneGlide, 50.0f).set (PID::DroneFollow, 0.0f);
+
+    std::vector<float> out;
+    // 1 s of A3 (220 Hz), then 1 s of silence.
+    runModule (drone, ps, 48000.0, 96000,
+               [] (int n) { return n < 48000 ? 0.5f * std::sin (2.0f * 3.14159265f * 220.0f * (float) n / 48000.0f) : 0.0f; },
+               [&] (int, float l, float) { out.push_back (l); });
+
+    INFO ("drone note " << drone.getCurrentNote());
+    REQUIRE (std::abs (drone.getCurrentNote() - 45.0) < 0.1);   // A2
+    std::vector<float> tail (out.begin() + 72000, out.end());
+    REQUIRE (rms (tail) > 0.01);                                 // keeps droning
+}

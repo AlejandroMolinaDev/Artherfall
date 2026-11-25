@@ -231,3 +231,34 @@ TEST_CASE ("Processor CPU benchmark with a typical chain", "[.bench]")
     const double secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
     WARN ("typical chain + core: " << 100.0 * secs / (blocks * 256 / 48000.0) << " % of one core");
 }
+
+TEST_CASE ("Processor CPU benchmark with a heavy chain", "[.bench]")
+{
+    using aetherfall::ModuleType;
+    AetherfallProcessor p;
+    p.setPlayConfigDetails (2, 2, 48000.0, 256);
+    p.prepareToPlay (48000.0, 256);
+
+    auto order = aetherfall::chain::emptyOrder();
+    const ModuleType heavy[] = { ModuleType::Spectral, ModuleType::Granular, ModuleType::Drone, ModuleType::Resonator,
+                                 ModuleType::ShimmerDelay, ModuleType::MultiTap, ModuleType::ModFX, ModuleType::Saturator };
+    for (size_t i = 0; i < 8; ++i) order[i] = heavy[i];
+    p.setChainOrder (order);
+    setParam (p, PID::CoreShimmer, 0.4f);
+    setParam (p, PID::SatOversample, 2.0f);
+
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    aetherfall::dsp::Random32 rng (1);
+    const int blocks = 48000 * 10 / 256;
+    const auto t0 = juce::Time::getHighResolutionTicks();
+    for (int b = 0; b < blocks; ++b)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 256; ++i)
+                buffer.setSample (ch, i, 0.2f * rng.nextBipolar());
+        p.processBlock (buffer, midi);
+    }
+    const double secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
+    WARN ("heavy 8-module chain + core: " << 100.0 * secs / (blocks * 256 / 48000.0) << " % of one core");
+}

@@ -223,3 +223,54 @@ TEST_CASE ("Processor: chain order is saved with the state and reaches the audio
     }
     REQUIRE (q.getActiveChainOrder() == order);
 }
+
+TEST_CASE ("Processor reports the Spectral latency and keeps dry and wet aligned", "[chain][processor][spectral]")
+{
+    AetherfallProcessor p;
+    p.setPlayConfigDetails (2, 2, 48000.0, 256);
+    p.prepareToPlay (48000.0, 256);
+
+    auto setParam = [&] (PID pid, float v)
+    {
+        auto* param = p.getValueTreeState().getParameter (juce::String (std::string (info (pid).id)));
+        param->setValueNotifyingHost (param->convertTo0to1 (v));
+    };
+
+    setParam (PID::CoreMix, 0.0f);       // core transparent
+    setParam (PID::SpecMix, 0.0f);       // spectral slot fully dry (but still delayed)
+    p.setChainOrder (makeOrder ({ ModuleType::Spectral }));
+
+    auto input = [] (int n) { return 0.5f * std::sin (2.0f * 3.14159265f * 330.0f * (float) n / 48000.0f); };
+
+    for (float outMix : { 0.0f, 1.0f })
+    {
+        setParam (PID::OutMix, outMix);
+        juce::AudioBuffer<float> buf (2, 256);
+        juce::MidiBuffer midi;
+        float maxErr = 0.0f;
+        for (int block = 0; block < 200; ++block)
+        {
+            for (int i = 0; i < 256; ++i)
+            {
+                const float x = input (block * 256 + i);
+                buf.setSample (0, i, x);
+                buf.setSample (1, i, x);
+            }
+            p.processBlock (buf, midi);
+            if (block > 100)
+                for (int i = 0; i < 256; ++i)
+                    maxErr = std::max (maxErr, std::abs (buf.getSample (0, i) - input (block * 256 + i - 4096)));
+        }
+        INFO ("out mix " << outMix << " alignment error " << maxErr);
+        REQUIRE (p.getLatencySamples() == 4096);
+        REQUIRE (maxErr < 1.0e-3f);
+    }
+
+    // Removing the module brings the latency back to zero.
+    p.setChainOrder (chain::emptyOrder());
+    juce::AudioBuffer<float> buf (2, 256);
+    juce::MidiBuffer midi;
+    for (int block = 0; block < 20; ++block)
+        p.processBlock (buf, midi);
+    REQUIRE (p.getLatencySamples() == 0);
+}

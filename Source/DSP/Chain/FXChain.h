@@ -8,6 +8,7 @@
 #include "IModule.h"
 #include "ChainOrder.h"
 #include "DSP/Utils/Smoothers.h"
+#include "DSP/Utils/DelayLine.h"
 
 namespace aetherfall
 {
@@ -46,7 +47,16 @@ public:
     chain::Order getActiveOrder() const noexcept { return active; }
     bool isTransitioning() const noexcept { return fadeState != Fade::None; }
 
-    int getLatencySamples() const;
+    /** Latency of the chain as last processed (sum over serial groups of the
+        largest latency in each group). */
+    int getLatencySamples() const noexcept { return currentLatency; }
+
+    /** Latency estimate for an order assuming all slots are serial (used
+        before the first block, e.g. in prepareToPlay). */
+    int estimateLatency (const chain::Order&) const;
+
+    /** Largest latency any module can report (sizes the compensation delays). */
+    static constexpr int maxModuleLatency = 4096;
     double getTailSeconds() const;
 
     IModule* getModule (ModuleType t) noexcept { return modules[(size_t) t].get(); }
@@ -57,6 +67,12 @@ private:
         dsp::LinearSmoother<float> enable;   // 0 = bypassed, 1 = active
         dsp::LinearSmoother<float> mix;
         bool processing = false;             // was processed in the previous chunk
+
+        // Latency compensation (only used when a module of the chain reports
+        // latency, i.e. Spectral): dryComp aligns this slot's dry signal with
+        // its own delayed wet signal; groupComp aligns this branch with the
+        // slowest branch of its parallel group.
+        std::array<dsp::DelayLine<float>, 2> dryComp, groupComp;
     };
 
     enum class Fade { None, Out, In };
@@ -73,10 +89,11 @@ private:
     dsp::LinearSmoother<float> fade;
 
     juce::AudioBuffer<float> chainInput, groupInput, groupSum, branch;
-    std::vector<float> groupWeight;
+    std::vector<float> groupWeight, enableBuf;
 
     double sampleRate = 48000.0;
     int maxBlockSize = 64;
+    int currentLatency = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FXChain)
 };

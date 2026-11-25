@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F3 – Chain + primeros módulos **terminada** → siguiente: **F4 – Módulos restantes**.
+- **Fase:** F4 – Módulos restantes **terminada** (18/18 módulos) → siguiente: **F5 – Modulación**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -57,19 +57,46 @@
   reordenar sin clicks ×2, solo, parallel), orden de cadena guardado en el estado.
   CPU (`[.bench]`): cadena típica de 5 módulos + core con shimmer = 3.9 % de un núcleo a 48 kHz.
 
+- **F4 – Módulos restantes (13):** en `Source/DSP/Modules/`: `Bitcrush`, `RingFreq` (ring + freq shifter SSB con
+  Hilbert IIR), `ModFX` (phaser 2–12 etapas / flanger / chorus 6 voces), `ShimmerDelay`, `MultiTap` (8 taps con
+  forma y difusión progresiva, compensando el retardo de los difusores), `Comb` (Karplus con smear y gancho de
+  pitch tracking), `TranceGate` (patrón en el nodo `GATE` del estado), `ReverseSwell` (dos cabezas en reversa con
+  fundido, modo swell), `TextureLayer` (vinilo, hiss, viento, lluvia, hum procedurales + envelope follower),
+  `LoFiTape`, `ResonatorBank` (4–8 resonadores de cuerda en acordes de la tonalidad global), `DroneGenerator`
+  (YIN + cuantización a escala + voicings + osciladores sine→saw PolyBLEP + ruido + LP resonante),
+  `SpectralFreeze` (STFT 2048/4096, smear, freeze con fase que avanza, blur, shimmer espectral, tilt; latencia
+  fija 4096).
+  - Nuevos utils: `Source/DSP/Utils/MusicTheory.h` (escalas, cuantización), `Source/DSP/Analysis/PitchTracker`.
+  - Latencia: `FXChain` compensa dry de slot y ramas paralelas; el procesador retrasa la señal seca y reporta
+    `setLatencySamples()` (0 sin Spectral, 4096 con Spectral).
+  - Procesador: API `setGatePattern()/getGatePattern()`.
+- **Tests: 58 casos, todos verdes** (+ comportamiento de cada módulo nuevo, identidad del STFT con retardo exacto,
+  freeze espectral, drone sigue la nota A3→A2 y sostiene, latencia reportada y alineación dry/wet).
+  CPU (`[.bench]`): cadena típica 3.7 %; cadena extrema de 8 módulos pesados (Spectral, Granular, Drone,
+  Resonator, Shimmer Delay, Multi-Tap, ModFX, Saturator 4x) + core = 9.3 % de un núcleo → optimizar en F10.
+
 ## A medias
 - Nada a medias.
 
 ## Siguiente paso exacto
-- **F4 – módulos restantes**, en `Source/DSP/Modules/<Nombre>.{h,cpp}`, registrando cada uno en
-  `ModuleFactory.cpp` (`createModule` + lista `implemented` de `isModuleImplemented`). Orden sugerido (de más
-  simple a más complejo): `Bitcrush`, `RingFreq`, `ModFX` (phaser/flanger/chorus), `ShimmerDelay` (reutiliza
-  `dsp::PitchShifter`), `MultiTap`, `Comb`, `Resonator`, `Gate` (patrón de 16 pasos: guardar como propiedad
-  `pattern` (uint16) en un nodo `GATE` del estado + espejo atómico, igual que la cadena), `ReverseSwell`,
-  `Texture`, `LoFi`, `Drone` (necesita pitch tracking: crear `Source/DSP/Analysis/PitchTracker`),
-  `Spectral` (FFT 2048/4096, reporta latencia: `FXChain::getLatencySamples()` → `setLatencySamples()` en el
-  procesador + retrasar la señal seca en igual medida).
-- Cada módulo: añadir test específico en `tests/ModuleTests.cpp` (el test de estrés ya cubre los 18).
+- **F5 – Modulación** en `Source/DSP/Modulation/` y `Source/DSP/Analysis/`:
+  1. `ModSources.h`: enum de fuentes (LFO1–8, Env1–4, Seq1–2, Chaos1–2, Macro1–4, Analyzer: RMS, transient,
+     pitch, centroid; MIDI: note, velocity, modwheel, CC) — los IDs de fuente se guardan en el estado.
+  2. `LFO` (formas sine/tri/saw/square/S&H/smooth random/custom, sync con `TempoPhase`, fase, retrigger
+     Free/Transport/Transient/MIDI, polaridad, smooth), `EnvFollower` (input/wet), `StepSeq` (pasos en el nodo
+     `SEQ` del estado), `Chaos` (Lorenz / drunk walk).
+  3. `InputAnalyzer` (RMS, detector de transitorios, `PitchTracker`, centroide espectral) → rellena
+     `ModContext::analysis` (el Comb ya lo usa en modo Track).
+  4. `ModMatrix`: 32 slots (fuente, destino = cualquier `PID` con `isModulatable()`, cantidad = `modN_amt`, curva,
+     vía) en el nodo `MODMATRIX` del estado + snapshot lock-free (triple buffer) para el audio thread. En
+     `processChunk` sustituir la copia `effective = params` por: valores base normalizados + Σ modulaciones,
+     desnormalizados con `makeRange()` (precalcular los rangos en un array).
+  5. `MacroMap`: 4 macros × 8 destinos (rango min/max por destino) en el nodo `MACROS`; mapeo por defecto de la
+     spec (HAZE/DRIFT/GRIT/BLOOM). `glob_moddepth` escala las fuentes moduladoras.
+  6. MIDI: leer el `MidiBuffer` en `processBlock` (nota, velocity, mod wheel, CC) para las fuentes MIDI y el
+     retrigger de LFOs.
+  7. Tests: LFO sincronizado a 120 BPM cae en la fase correcta, matriz modula un destino dentro de rango,
+     macros mapean, estado de la matriz se guarda/recupera.
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
@@ -77,7 +104,7 @@
   repo público. Linux/Windows validan igualmente.
 - pluginval no se puede ejecutar dentro del contenedor de las sesiones de Claude (bloqueado por permisos);
   se valida en CI.
-- Ajustes de sonido pendientes de escucha real (no posible en el contenedor): nivel con Decay muy corto + Size
-  grande queda ~ −11 dB; carácter de cada color mode; profundidad máxima de modulación; balance de niveles entre
-  módulos.
-- La latencia del plugin es 0 por ahora; cuando exista el módulo Spectral habrá que compensar la señal seca.
+- Ajustes de sonido pendientes de escucha real (no posible en el contenedor): niveles relativos de los módulos,
+  carácter de los color modes, profundidades máximas de modulación, timbre del Drone y de las texturas.
+- CPU de la cadena extrema 9.3 % (> 8 % objetivo para preset típico; el típico está en 3.7 %). Candidatos F10:
+  trig por muestra en ModFX/Stereo/Drone (usar fasores), Spectral (atan2/sin/cos por bin), Granular (ventanas).

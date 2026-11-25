@@ -142,7 +142,29 @@ void AetherfallProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto* sm : { &outDryGain, &outWetGain, &outGain, &bypassMix })
         sm->prepare (currentSampleRate, 0.03);
 
+    for (auto& d : dryDelay)
+        d.prepare (FXChain::maxModuleLatency * 2 + controlBlockSize);
+    dryDelayFade.prepare (currentSampleRate, 0.02);
+
     reset();
+}
+
+void AetherfallProcessor::updateLatency (int newLatency)
+{
+    if (newLatency == dryDelayCurrent)
+        return;
+
+    // Crossfade the dry path from the old delay to the new one.
+    dryDelayPrevious = dryDelayCurrent;
+    dryDelayCurrent = newLatency;
+    dryDelayFade.setCurrentAndTarget (0.0f);
+    dryDelayFade.setTarget (1.0f);
+
+    if (newLatency != reportedLatency)
+    {
+        reportedLatency = newLatency;
+        setLatencySamples (newLatency);
+    }
 }
 
 void AetherfallProcessor::releaseResources() {}
@@ -152,6 +174,12 @@ void AetherfallProcessor::reset()
     chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
     chain.reset();
     core.reset();
+
+    for (auto& d : dryDelay) d.reset();
+    dryDelayCurrent = dryDelayPrevious = chain.getLatencySamples();
+    dryDelayFade.setCurrentAndTarget (1.0f);
+    reportedLatency = dryDelayCurrent;
+    setLatencySamples (reportedLatency);
 
     const float mix = params.load (PID::OutMix);
     outDryGain.setCurrentAndTarget (std::cos (mix * juce::MathConstants<float>::halfPi));
@@ -246,9 +274,32 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     if (ctx.transport.hasPpq)
         ctx.transport.ppqPosition += (double) start / currentSampleRate * (ctx.transport.bpm / 60.0);
 
-    // 4) Keep the dry signal for the dry/wet and bypass crossfades.
+    // 4) Keep the dry signal for the dry/wet and bypass crossfades, delayed by
+    //    the chain latency so dry and wet stay aligned.
     for (int ch = 0; ch < 2; ++ch)
-        std::copy_n (io.getReadPointer (ch, start), length, dryChunk[(size_t) ch].data());
+    {
+        const float* src = io.getReadPointer (ch, start);
+        float* dst = dryChunk[(size_t) ch].data();
+        auto& dl = dryDelay[(size_t) ch];
+        for (int i = 0; i < length; ++i)
+            dl.write (src[i]);
+        for (int i = 0; i < length; ++i)
+        {
+            const int back = length - 1 - i;   // samples written after sample i
+            dst[i] = dl.tap (dryDelayCurrent + back);
+        }
+        if (dryDelayFade.isSmoothing())
+        {
+            auto fade = dryDelayFade;   // same ramp for both channels
+            for (int i = 0; i < length; ++i)
+            {
+                const float g = fade.next();
+                const float old = dl.tap (dryDelayPrevious + length - 1 - i);
+                dst[i] = old + g * (dst[i] - old);
+            }
+        }
+    }
+    dryDelayFade.skip (length);
 
     // A view of the chunk (2 channels: no heap allocation).
     juce::AudioBuffer<float> chunk (io.getArrayOfWritePointers(), 2, start, length);
@@ -257,6 +308,10 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
     chain.process (chunk, ctx);
     core.process (chunk, ctx);
+
+    // The chain latency may change when its order changes (Spectral added or
+    // removed). Applied from the next chunk on.
+    updateLatency (chain.getLatencySamples());
 
     // 6) Provisional output stage: dry/wet, output gain, bypass.
     const float mix = ctx.get (PID::OutMix);

@@ -23,11 +23,14 @@ void FXChain::prepare (double sr, int maxBlock)
         st.enable.prepare (sr, 0.015);
         st.mix.prepare (sr, 0.02);
         st.processing = false;
+        for (auto& d : st.dryComp)   d.prepare (maxModuleLatency + 8);
+        for (auto& d : st.groupComp) d.prepare (maxModuleLatency + 8);
     }
 
     for (auto* b : { &chainInput, &groupInput, &groupSum, &branch })
         b->setSize (2, maxBlockSize, false, true, false);
     groupWeight.assign ((size_t) maxBlockSize, 0.0f);
+    enableBuf.assign ((size_t) maxBlockSize, 0.0f);
 
     fade.prepare (sr, 0.010);
     reset();
@@ -45,6 +48,12 @@ void FXChain::reset()
     // Apply any pending order immediately (no fade needed after a reset).
     active = chain::unpack (requested);
     activePacked = requested;
+    currentLatency = estimateLatency (active);
+    for (int t = 1; t <= numModuleTypes; ++t)
+    {
+        for (auto& d : states[(size_t) t].dryComp)   d.reset();
+        for (auto& d : states[(size_t) t].groupComp) d.reset();
+    }
     fadeState = Fade::None;
     fade.setCurrentAndTarget (1.0f);
 }
@@ -65,10 +74,10 @@ void FXChain::applyPendingOrder()
             states[(size_t) t].processing = false;
 }
 
-int FXChain::getLatencySamples() const
+int FXChain::estimateLatency (const chain::Order& order) const
 {
     int total = 0;
-    for (auto t : active)
+    for (auto t : order)
         if (t != ModuleType::None && modules[(size_t) t] != nullptr)
             total += modules[(size_t) t]->getLatencySamples();
     return total;
@@ -126,6 +135,28 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
     float* const br1 = branch.getWritePointer (1);
     float* const gw  = groupWeight.data();
 
+    // --- Pre-scan: group membership and the latency of each group (a group is a
+    //     serial slot plus the parallel slots that follow it).
+    std::array<int, (size_t) numChainSlots> slotGroup {};
+    std::array<int, (size_t) numChainSlots> groupLatency {};
+    {
+        int g = -1;
+        for (size_t s = 0; s < active.size(); ++s)
+        {
+            const auto type = active[s];
+            if (type == ModuleType::None)
+                continue;
+            if (g < 0 || ! ctx.getBool (moduleInfo (type).parallel))
+                ++g;
+            slotGroup[s] = g;
+            groupLatency[(size_t) g] = std::max (groupLatency[(size_t) g], modules[(size_t) type]->getLatencySamples());
+        }
+        int total = 0;
+        for (int k = 0; k <= g; ++k)
+            total += groupLatency[(size_t) k];
+        currentLatency = total;
+    }
+
     bool groupOpen = false;
 
     auto closeGroup = [&]
@@ -139,8 +170,23 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
         }
     };
 
-    for (auto type : active)
+    // Delays a branch output so every branch of a group has the same latency.
+    auto alignBranch = [&] (ModuleState& st, float* b0, float* b1, int delay)
     {
+        if (delay <= 0)
+            return;
+        for (int i = 0; i < n; ++i)
+        {
+            st.groupComp[0].write (b0[i]);
+            st.groupComp[1].write (b1[i]);
+            b0[i] = st.groupComp[0].tap (delay);
+            b1[i] = st.groupComp[1].tap (delay);
+        }
+    };
+
+    for (size_t slot = 0; slot < active.size(); ++slot)
+    {
+        const auto type = active[slot];
         if (type == ModuleType::None)
             continue;
 
@@ -150,6 +196,8 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
 
         const bool on = ctx.getBool (mi.on) && (! anySolo || ctx.getBool (mi.solo));
         const bool parallel = groupOpen && ctx.getBool (mi.parallel);
+        const int latency = module->getLatencySamples();
+        const int gLatency = groupLatency[(size_t) slotGroup[slot]];
 
         if (! parallel)
         {
@@ -168,7 +216,9 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
         st.enable.setTarget (on ? 1.0f : 0.0f);
         st.mix.setTarget (ctx.get (mi.mix));
 
-        const bool needsProcessing = on || st.enable.isSmoothing() || st.enable.getCurrent() > 0.0f;
+        // Modules with latency always run while in the chain, so their delayed
+        // dry/wet paths stay continuous when they are switched on and off.
+        const bool needsProcessing = latency > 0 || on || st.enable.isSmoothing() || st.enable.getCurrent() > 0.0f;
 
         if (! needsProcessing)
         {
@@ -177,12 +227,17 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
             st.mix.skip (n);
 
             if (isHead)   // a bypassed serial slot passes its input through
+            {
+                std::copy_n (gi0, n, br0);
+                std::copy_n (gi1, n, br1);
+                alignBranch (st, br0, br1, gLatency);
                 for (int i = 0; i < n; ++i)
                 {
-                    gs0[i] += gi0[i];
-                    gs1[i] += gi1[i];
+                    gs0[i] += br0[i];
+                    gs1[i] += br1[i];
                     gw[i] += 1.0f;
                 }
+            }
             continue;
         }
 
@@ -191,6 +246,8 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
             // (Re)started: clean state, no ramp from stale smoother values.
             module->reset();
             st.mix.setCurrentAndTarget (ctx.get (mi.mix));
+            for (auto& d : st.dryComp)   d.reset();
+            for (auto& d : st.groupComp) d.reset();
             st.processing = true;
         }
 
@@ -200,18 +257,37 @@ void FXChain::process (juce::AudioBuffer<float>& io, const ModContext& ctx)
         juce::AudioBuffer<float> view (branch.getArrayOfWritePointers(), 2, 0, n);
         module->process (view, ctx);
 
+        float* const eb = enableBuf.data();
         for (int i = 0; i < n; ++i)
         {
             const float e = st.enable.next();
             const float m = st.mix.next();
             const float amt = e * m;
+            eb[i] = e;
 
-            const float o0 = gi0[i] + amt * (br0[i] - gi0[i]);
-            const float o1 = gi1[i] + amt * (br1[i] - gi1[i]);
-            const float w = isHead ? 1.0f : e;
+            float d0 = gi0[i], d1 = gi1[i];
+            if (latency > 0)
+            {
+                // Dry reference delayed like the module's wet output.
+                st.dryComp[0].write (d0);
+                st.dryComp[1].write (d1);
+                d0 = st.dryComp[0].tap (latency);
+                d1 = st.dryComp[1].tap (latency);
+            }
 
-            gs0[i] += w * o0;
-            gs1[i] += w * o1;
+            br0[i] = d0 + amt * (br0[i] - d0);
+            br1[i] = d1 + amt * (br1[i] - d1);
+        }
+
+        alignBranch (st, br0, br1, gLatency - latency);
+
+        // Parallel branches are weighted by their on/off ramp, so they drop out
+        // of the average smoothly when switched off.
+        for (int i = 0; i < n; ++i)
+        {
+            const float w = isHead ? 1.0f : eb[i];
+            gs0[i] += w * br0[i];
+            gs1[i] += w * br1[i];
             gw[i] += w;
         }
     }

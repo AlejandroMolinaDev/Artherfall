@@ -16,6 +16,8 @@
 #include "TextureLayer.h"
 #include "LoFiTape.h"
 #include "ResonatorBank.h"
+#include "DroneGenerator.h"
+#include "SpectralFreeze.h"
 
 namespace aetherfall
 {
@@ -59,9 +61,9 @@ std::unique_ptr<IModule> createModule (ModuleType type)
         case ModuleType::Texture:    return std::make_unique<TextureLayer>();
         case ModuleType::LoFi:       return std::make_unique<LoFiTape>();
         case ModuleType::Resonator:  return std::make_unique<ResonatorBank>();
+        case ModuleType::Drone:      return std::make_unique<DroneGenerator>();
+        case ModuleType::Spectral:   return std::make_unique<SpectralFreeze>();
 
-        case ModuleType::Spectral:
-        case ModuleType::Drone:
         case ModuleType::None:
         case ModuleType::Count:
             break;
@@ -76,7 +78,7 @@ bool isModuleImplemented (ModuleType type) noexcept
         ModuleType::Saturator, ModuleType::Stereo, ModuleType::Bitcrush, ModuleType::RingFreq,
         ModuleType::ModFX, ModuleType::ShimmerDelay, ModuleType::MultiTap, ModuleType::Comb,
         ModuleType::Gate, ModuleType::ReverseSwell, ModuleType::Texture, ModuleType::LoFi,
-        ModuleType::Resonator
+        ModuleType::Resonator, ModuleType::Drone, ModuleType::Spectral
     };
 
     for (auto t : implemented)

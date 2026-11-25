@@ -9,6 +9,7 @@
 #include "DSP/Chain/FXChain.h"
 #include "DSP/Chain/ChainOrder.h"
 #include "DSP/Utils/Smoothers.h"
+#include "DSP/Utils/DelayLine.h"
 
 namespace aetherfall
 {
@@ -110,6 +111,14 @@ private:
 
     // Dry copy of the current chunk (for dry/wet and bypass).
     std::array<std::array<float, controlBlockSize>, 2> dryChunk {};
+
+    // Latency compensation of the dry path (the chain may add latency, e.g.
+    // the Spectral module). Changes of the delay are crossfaded.
+    std::array<dsp::DelayLine<float>, 2> dryDelay;
+    int dryDelayCurrent = 0, dryDelayPrevious = 0;
+    dsp::LinearSmoother<float> dryDelayFade;
+    int reportedLatency = 0;
+    void updateLatency (int newLatency);
 
     // Provisional output stage (dry/wet, gain, bypass) until the full Output
     // Stage of phase F6 replaces it.

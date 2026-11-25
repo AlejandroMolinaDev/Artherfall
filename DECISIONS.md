@@ -111,3 +111,24 @@ Formato: fecha · decisión · motivo.
 - **Decisión:** el buffer circular (~8 s, potencia de 2) guarda la suma mono de la entrada (+ feedback); cada grano
   se panoramiza dentro de "Width". Normalización de nivel por `1/sqrt(densidad·tamaño)`.
 - **Motivo:** mitad de memoria y lecturas, y las nubes ganan anchura por el paneo aleatorio por grano.
+
+### 2026-11-25 · Latencia: Spectral siempre 4096 muestras, compensada en cadena y en la señal seca
+- **Decisión:** el módulo Spectral reporta siempre 4096 muestras (también con FFT 2048, rellenando). En la
+  cadena, los módulos con latencia se procesan siempre mientras están en ella (aunque estén apagados), la señal
+  seca del slot se retrasa igual (`dryComp`) y las ramas de un grupo paralelo se alinean con la más lenta
+  (`groupComp`). El procesador retrasa la señal seca del dry/wet final y llama a `setLatencySamples()` cuando la
+  latencia de la cadena cambia (cambio de delay de la señal seca con fundido de 20 ms).
+- **Motivo:** la latencia solo existe si el Spectral está en la cadena (el resto de usos queda sin latencia) y
+  no cambia al cambiar el tamaño de FFT (cambiar latencia en caliente obliga al host a recompensar). Verificado
+  por test: alineación exacta dry/wet con latencia 4096.
+
+### 2026-11-25 · Patrón del Trance Gate como estado
+- **Decisión:** nodo `GATE` (propiedad `pattern`, 16 bits, bit 0 = paso 1) + `std::atomic<uint32_t>`; llega a
+  los módulos en `ModContext::gatePattern`.
+- **Motivo:** mismo patrón que el orden de la cadena: se guarda con el proyecto/presets, editable desde la GUI
+  (F7/F8) y con undo, sin 16 parámetros de automatización extra.
+
+### 2026-11-25 · Pitch tracking YIN propio (`Source/DSP/Analysis/PitchTracker`)
+- **Decisión:** YIN sobre la señal decimada a ~12 kHz, ventana 1024, hop 256, rango ~45 Hz–1.5 kHz, umbral 0.15.
+  El Drone usa su propia instancia sobre la entrada de su slot; el Input Analyzer de F5 reutilizará la clase.
+- **Motivo:** robusto para voces/bajos/pads, coste acotado y sin allocations en el audio thread.
