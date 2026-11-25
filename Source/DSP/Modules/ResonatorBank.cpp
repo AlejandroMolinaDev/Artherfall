@@ -96,15 +96,41 @@ void ResonatorBank::process (juce::AudioBuffer<float>& buffer, const ModContext&
     drive.setTarget (clamp (ctx.get (PID::ResoDrive), 0.0f, 1.0f));
     tail = decay.getTarget() + 0.2;
 
-    const double driftInc = 0.07 / sampleRate;
+    // --- Control rate: per-voice period, loop gain and pan (the per-sample loop
+    //     below only reads delay lines). Glide and drift move slowly, so one
+    //     update per chunk is inaudible and saves pow/exp per sample.
+    const double chunkGlide = std::pow (glide, (double) n);
+    const double driftInc = 0.07 / sampleRate * n;
+    const float t60 = decay.getTarget();
+    std::array<float, maxVoices> period {}, fbGain {}, gainL {}, gainR {};
+    for (int v = 0; v < maxVoices; ++v)
+    {
+        auto& voice = voices[(size_t) v];
+        voice.logFreq = targetLog[(size_t) v] + chunkGlide * (voice.logFreq - targetLog[(size_t) v]);
+        voice.driftPhase += driftInc * (1.0 + 0.3 * v);
+        voice.driftPhase -= std::floor (voice.driftPhase);
+
+        const double cents = detuneAmt * (voice.staticDetune + 6.0 * std::sin (twoPi * voice.driftPhase));
+        const double hz = std::exp (voice.logFreq) * std::exp2 (cents / 1200.0);
+        period[(size_t) v] = (float) std::max (2.0, sampleRate / hz - 1.0);
+        // Loop gain for a 60 dB decay in t60 seconds: g = 10^(-3 / (f * t60)).
+        fbGain[(size_t) v] = (float) std::pow (10.0, -3.0 / (hz * std::max (0.05f, t60)));
+
+        const float sp = spread.getTarget();
+        const float pan = ((v & 1) ? 1.0f : -1.0f) * sp * (0.4f + 0.6f * (float) v / maxVoices);
+        const float theta = (pan + 1.0f) * (float) (pi * 0.25);
+        gainL[(size_t) v] = std::cos (theta) * 1.41421356f;
+        gainR[(size_t) v] = std::sin (theta) * 1.41421356f;
+    }
+    decay.skip (n);
+    spread.skip (n);
+
     const float norm = 1.6f / std::sqrt ((float) numVoices);
     float* x[2] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
 
     for (int i = 0; i < n; ++i)
     {
-        const float t60 = decay.next();
         const float br = bright.next();
-        const float sp = spread.next();
         const float dr = drive.next();
 
         // Excitation: (optionally saturated) mono input.
@@ -121,31 +147,18 @@ void ResonatorBank::process (juce::AudioBuffer<float>& buffer, const ModContext&
             if (g <= 1.0e-5f && v >= numVoices)
                 continue;
 
-            voice.logFreq = targetLog[(size_t) v] + glide * (voice.logFreq - targetLog[(size_t) v]);
-            voice.driftPhase += driftInc * (1.0 + 0.3 * v);
-            if (voice.driftPhase >= 1.0) voice.driftPhase -= 1.0;
-
-            const double cents = detuneAmt * (voice.staticDetune + 6.0 * std::sin (twoPi * voice.driftPhase));
-            const double hz = std::exp (voice.logFreq) * std::exp2 (cents / 1200.0);
-            const double period = sampleRate / hz;
-
-            // Loop gain for a 60 dB decay in t60 seconds: g = 10^(-3 / (f * t60)).
-            const float fbGain = (float) std::pow (10.0, -3.0 / (hz * std::max (0.05f, t60)));
-            // Equal-power pan, alternating sides.
-            const float pan = ((v & 1) ? 1.0f : -1.0f) * sp * (0.4f + 0.6f * (float) v / maxVoices);
-            const float theta = (pan + 1.0f) * (float) (pi * 0.25);
-            const float gl = std::cos (theta) * 1.41421356f, gr = std::sin (theta) * 1.41421356f;
-
+            const float fb = fbGain[(size_t) v];
+            const float drive0 = exc * (1.0f - fb) * 4.0f;
             for (int c = 0; c < 2; ++c)
             {
                 auto& line = voice.line[(size_t) c];
                 auto& damp = voice.damp[(size_t) c];
-                float y = line.tapCubic ((float) std::max (2.0, period - 1.0));
+                float y = line.tapCubic (period[(size_t) v]);
                 damp.setCoefficient (dampCoeff);
                 y = damp.processLP (y);
-                const float w = exc * (1.0f - fbGain) * 4.0f + fbGain * y;
+                const float w = drive0 + fb * y;
                 line.write (std::abs (w) > 2.0f ? std::copysign (2.0f + fastTanh (std::abs (w) - 2.0f), w) : w);
-                (c == 0 ? outL : outR) += g * y * (c == 0 ? gl : gr);
+                (c == 0 ? outL : outR) += g * y * (c == 0 ? gainL[(size_t) v] : gainR[(size_t) v]);
             }
         }
 

@@ -210,3 +210,16 @@ Formato: fecha · decisión · motivo.
 - **Decisión:** fila 1 = logo, barra de presets (◀ nombre | categoría ▶), undo/redo, A/B, RAND, bypass; fila 2 =
   pestañas. Altura de cabecera 84 px (las vistas tienen 556 px a escala 1).
 - **Motivo:** espacio para el navegador de presets sin comprimir las pestañas.
+
+### 2026-11-25 · Optimización (F10)
+- **Decisión:** (1) trabajo a tasa de control donde no se oye: Resonator y Drone calculan frecuencias, ganancias de
+  lazo y paneos una vez por trozo (glide por trozo); (2) `dsp::sinCycles/cosCycles` (reducción a cuarto de periodo
+  + polinomio de 7º orden, error ~2e-4) en LFOs internos y osciladores (ModFX, Stereo, Tape, Comb, LoFi, Reverse,
+  Texture, Drone); (3) Spectral sin atan2/sin/cos por bin: fasores unitarios, tabla de rotación por bin para el
+  freeze y ganancias de tilt cacheadas; (4) coeficientes del phaser cada 4 muestras; filtro del viento por trozo;
+  (5) el pitch tracking del Input Analyzer solo corre si alguna ruta usa "In Pitch" o el Comb está en Track.
+- **Calidad (`glob_quality`):** Eco = lecturas lineales en el FDN, Saturator sin oversampling, Spectral a FFT 2048,
+  Granular ≤ 32 granos, chorus ≤ 3 voces. Normal = lo configurado. High = Saturator a 4x. La latencia reportada no
+  cambia con la calidad.
+- **Resultado (`[.bench]`, 48 kHz, este contenedor):** cadena típica 5.1 % → 4.2 %; cadena extrema de 8 módulos
+  pesados 10.4 % → 7.7 %; core solo 1.9 % (3.3 % con shimmer). Meta de la spec (< 8 %) cumplida.

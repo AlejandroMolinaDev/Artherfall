@@ -86,7 +86,7 @@ void Comb::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx)
             auto& chan = ch[(size_t) c];
             chan.logFreq = targetLog[c] + glide * (chan.logFreq - targetLog[c]);
 
-            const double mod = 1.0 + modDepth * std::sin (twoPi * (modPhase + 0.25 * c));
+            const double mod = 1.0 + modDepth * sinCycles (modPhase + 0.25 * c);
             const double period = sampleRate / std::exp (chan.logFreq) * mod;
             float y = chan.line.tapCubic ((float) std::max (2.0, period - 1.0));
 

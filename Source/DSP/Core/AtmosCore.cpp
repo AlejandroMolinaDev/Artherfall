@@ -185,6 +185,7 @@ void AtmosCore::updateChunkParameters (const ModContext& ctx, int n)
     p.lfCutoffHz = std::max (dampLF, cs.lfMin);
     p.saturation = cs.saturation;
     p.inputGain  = 1.0 - freeze;
+    p.linearInterpolation = ctx.getChoice (PID::GlobQuality) == 0;   // Eco
 
     const double hfExp = 1.0 / std::max (0.05, cs.hfRatio) - 1.0;
     const double lfExp = 1.0 / std::max (0.05, cs.lfRatio) - 1.0;

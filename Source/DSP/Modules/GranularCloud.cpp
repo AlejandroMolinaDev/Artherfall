@@ -64,9 +64,11 @@ float GranularCloud::window (int type, float phase) const noexcept
 
 void GranularCloud::spawnGrain (const ModContext& ctx)
 {
+    // Eco quality: at most 32 simultaneous grains.
+    const int voiceLimit = ctx.getChoice (PID::GlobQuality) == 0 ? maxGrains / 2 : maxGrains;
     Grain* g = nullptr;
-    for (auto& candidate : grains)
-        if (! candidate.active) { g = &candidate; break; }
+    for (int i = 0; i < voiceLimit; ++i)
+        if (! grains[(size_t) i].active) { g = &grains[(size_t) i]; break; }
 
     if (g == nullptr)
         return;   // all 64 voices busy

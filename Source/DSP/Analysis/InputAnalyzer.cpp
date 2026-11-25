@@ -30,7 +30,7 @@ void InputAnalyzer::reset()
     frame = {};
 }
 
-void InputAnalyzer::process (const float* left, const float* right, int n) noexcept
+void InputAnalyzer::process (const float* left, const float* right, int n, bool trackPitch) noexcept
 {
     onset = false;
     float peak = 0.0f;
@@ -65,7 +65,8 @@ void InputAnalyzer::process (const float* left, const float* right, int n) noexc
         diffEnergy = d * d + centroidCoeff * (diffEnergy - d * d);
         sigEnergy  = m * m + centroidCoeff * (sigEnergy - m * m);
 
-        pitch.push (m);
+        if (trackPitch)
+            pitch.push (m);
     }
 
     frame.rms = std::sqrt (ms);

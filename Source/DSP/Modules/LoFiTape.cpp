@@ -86,8 +86,8 @@ void LoFiTape::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx)
         // --- Wobble: slow wow + fast flutter on a short delay.
         wobPhase += wobInc;   if (wobPhase >= 1.0) wobPhase -= 1.0;
         flutPhase += flutInc; if (flutPhase >= 1.0) flutPhase -= 1.0;
-        const float mod = wb * (float) (0.0025 * sampleRate * std::sin (twoPi * wobPhase)
-                                        + 0.0002 * sampleRate * std::sin (twoPi * flutPhase));
+        const float mod = wb * (float) (0.0025 * sampleRate * sinCycles (wobPhase)
+                                        + 0.0002 * sampleRate * sinCycles (flutPhase));
 
         const float drive = 1.0f + 6.0f * s;
         const float satNorm = 1.0f / std::pow (drive, 0.6f);

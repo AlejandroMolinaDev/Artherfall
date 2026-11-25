@@ -531,3 +531,22 @@ TEST_CASE ("Drone follows the input pitch and sustains", "[modules][drone]")
     std::vector<float> tail (out.begin() + 72000, out.end());
     REQUIRE (rms (tail) > 0.01);                                 // keeps droning
 }
+
+TEST_CASE ("Per-module CPU benchmark", "[.bench]")
+{
+    const double sr = 48000.0;
+    const int seconds = 5;
+    for (int t = 1; t <= numModuleTypes; ++t)
+    {
+        auto m = createModule ((ModuleType) t);
+        m->prepare (sr, 64, 2);
+        ParamSet ps;
+        dsp::Random32 rng (1);
+        float sink = 0.0f;
+        const auto t0 = juce::Time::getHighResolutionTicks();
+        runModule (*m, ps, sr, (int) sr * seconds, [&] (int) { return 0.2f * rng.nextBipolar(); },
+                   [&] (int, float l, float) { sink += l; });
+        const double secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
+        WARN (std::string (moduleInfo ((ModuleType) t).name) << ": " << 100.0 * secs / seconds << " %  (" << sink << ")");
+    }
+}

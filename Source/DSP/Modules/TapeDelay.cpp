@@ -108,8 +108,8 @@ void TapeDelay::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx
 
         const double wowAmt  = (double) wow.next() * 0.004 * sr;      // up to 4 ms
         const double flutAmt = (double) flutter.next() * 0.0004 * sr; // up to 0.4 ms
-        const double mod = wowAmt * (0.6 * std::sin (twoPi * wowPhase) + 0.4 * wowDrift)
-                         + flutAmt * (0.7 * std::sin (twoPi * flutterPhase) + 0.3 * std::sin (twoPi * flutterPhase2));
+        const double mod = wowAmt * (0.6 * sinCycles (wowPhase) + 0.4 * wowDrift)
+                         + flutAmt * (0.7 * sinCycles (flutterPhase) + 0.3 * sinCycles (flutterPhase2));
 
         const float g = feedback.next();
         const float s = sat.next();

@@ -35,7 +35,7 @@ private:
 
     std::array<std::array<dsp::Allpass1<float>, maxStages>, 2> stages;
     std::array<dsp::DelayLine<float>, 2> lines;
-    std::array<float, 2> fbState {};
+    std::array<float, 2> fbState {}, phaserCoeff {};
     dsp::TempoPhase lfo;
     dsp::LinearSmoother<float> depth, feedback, center, width;
     int lastMode = -1;

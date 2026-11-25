@@ -62,8 +62,6 @@ float TextureLayer::generate (Voice& v, int type, float density) noexcept
 
         case 2: // Wind: drifting resonant band-pass, gusty amplitude
         {
-            const float fc = 300.0f + 900.0f * (float) (0.5 + 0.5 * windDrift);
-            v.band.setParams (fc, 0.82f, sr);
             const float g = (float) (0.35 + 0.65 * gust);
             return 2.2f * g * v.band.processBP (v.pink.process (white));
         }
@@ -123,6 +121,14 @@ void TextureLayer::process (juce::AudioBuffer<float>& buffer, const ModContext& 
     float* x[2] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
     const double humInc = 50.0 / sampleRate;
 
+    // Wind: the resonant band follows a slow drift -> update once per chunk.
+    if (type == 2)
+    {
+        const float fc = 300.0f + 900.0f * (float) (0.5 + 0.5 * windDrift);
+        for (auto& v : voices)
+            v.band.setParams (fc, 0.82f, (float) sampleRate);
+    }
+
     for (int i = 0; i < n; ++i)
     {
         // Slow random drift for wind (centre and gusts), re-targeted every 0.5 s.
@@ -149,10 +155,10 @@ void TextureLayer::process (juce::AudioBuffer<float>& buffer, const ModContext& 
         {
             humPhase += humInc;
             if (humPhase >= 1.0) humPhase -= 1.0;
-            const double ph = twoPi * humPhase;
-            const float buzz = 0.15f * (float) std::sin (ph * 7.0) * (float) (std::sin (ph) > 0.95 ? 1.0 : 0.0);
-            common = 0.5f * (float) (std::sin (ph) + 0.5 * std::sin (2.0 * ph) + (0.2 + 0.4 * tone) * std::sin (3.0 * ph)
-                                     + 0.15 * std::sin (5.0 * ph)) + buzz;
+            const float s1 = sinCycles (humPhase);
+            const float buzz = s1 > 0.95f ? 0.15f * sinCycles (humPhase * 7.0) : 0.0f;
+            common = 0.5f * (s1 + 0.5f * sinCycles (2.0 * humPhase) + (0.2f + 0.4f * tone) * sinCycles (3.0 * humPhase)
+                             + 0.15f * sinCycles (5.0 * humPhase)) + buzz;
         }
 
         for (int c = 0; c < 2; ++c)

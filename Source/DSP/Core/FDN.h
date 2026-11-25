@@ -62,6 +62,7 @@ public:
         double ratioA = 2.0, ratioB = 1.5;
         double saturation = 0.0;      // in-loop soft saturation (Lo-Fi colour)
         double inputGain = 1.0;       // 0 when frozen
+        bool linearInterpolation = false;   // Eco quality: cheaper reads
     };
 
     void prepare (double sampleRate, double maxLengthSamples)
@@ -147,6 +148,7 @@ public:
         satStep       = (p.saturation - cur.saturation) * inv;
         inGainStep    = (p.inputGain - cur.inputGain) * inv;
 
+        linear = p.linearInterpolation;
         for (auto& h : headsA) h.setRatio (p.ratioA);
         for (auto& h : headsB) h.setRatio (p.ratioB);
     }
@@ -183,7 +185,7 @@ public:
 
             // Read-before-write: a delay of D samples is tap(D - 1).
             const double d = cur.lengthSamples[k] + cur.modDepthSamples * (1.0 + im);
-            double y = lines[k].tapCubic (d - 1.0);
+            double y = linear ? lines[k].tapLinear (d - 1.0) : lines[k].tapCubic (d - 1.0);
 
             if (i < numShimmerLines && shim > 1.0e-4)
             {
@@ -307,7 +309,7 @@ private:
     double modDepthStep = 0.0, shimmerStep = 0.0, blendStep = 0.0, satStep = 0.0, inGainStep = 0.0;
 
     Params cur;
-    bool initialised = false;
+    bool initialised = false, linear = false;
     double sr = 48000.0;
     double shimmerWindow = 3360.0;
 };

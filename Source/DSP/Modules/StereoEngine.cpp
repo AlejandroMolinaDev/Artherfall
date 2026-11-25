@@ -90,8 +90,8 @@ void StereoEngine::process (juce::AudioBuffer<float>& buffer, const ModContext& 
         const float ob = orbit.next();
         const float bm = bassMonoAmt.next();
         const double ph = lfo.next();
-        const float sinP = (float) std::sin (twoPi * ph);
-        const float cosP = (float) std::cos (twoPi * ph);
+        const float sinP = sinCycles (ph);
+        const float cosP = cosCycles (ph);
 
         // Width, Haas (right channel delayed up to 30 ms), auto-pan, orbit.
         auto spatialise = [&] (float& a, float& b, DelayLine<float>& haasLine)

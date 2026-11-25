@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F9 – Presets **terminada** → siguiente: **F10 – Optimización**.
+- **Fase:** F10 – Optimización **terminada** → siguiente: **F11 – QA y entrega**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -145,36 +145,37 @@
   procesan audio sin NaN y por debajo del ceiling, contenido aplicado (cadena/gate/modulación/defaults), presets de
   usuario guardar/cargar/favoritos/borrar/anterior/siguiente, nombre del preset guardado con el proyecto).
 
+- **F10 – Optimización:** ver DECISIONS (2026-11-25 · Optimización). `dsp::sinCycles/cosCycles` en `DspMath.h`;
+  Resonator/Drone a tasa de control; Spectral sin trig por bin; pitch tracking bajo demanda; `glob_quality`
+  Eco/Normal/High implementado. Benchmarks (`AetherfallTests "[.bench]"`): cadena típica 4.2 %, cadena extrema
+  7.7 %, core 1.9–3.3 % de un núcleo a 48 kHz. Benchmark por módulo: `"Per-module CPU benchmark"`.
+- **Tests: 83 casos, todos verdes** (+ los 3 modos de calidad con cadena pesada sin NaN, techo y latencia fija).
+
 ## A medias
 - Nada a medias.
 
 ## Siguiente paso exacto
-- **F10 – Optimización** (meta: < 8 % de un núcleo a 48 kHz / buffer 256 con preset típico — hoy 4.3 % en el
-  test `[.bench]` de cadena típica; la cadena extrema de 8 módulos pesados da 9.3 %):
-  1. Perfilar con `perf` (`perf record ./build/tests/.../AetherfallTests "[.bench]"`) y atacar los puntos
-     calientes: trig por muestra (ModFX, StereoEngine, DroneGenerator, TapeDelay → osciladores por fasor o tablas),
-     `SpectralFreeze::processFrame` (atan2/sqrt/cos/sin por bin → aproximaciones rápidas), `GranularCloud`
-     (lectura de ventanas), `FDN16` (vectorizar el bucle de 16 líneas con `juce::dsp::SIMDRegister` o
-     auto-vectorización: arrays SoA).
-  2. Parámetro `glob_quality` (Eco / Normal / High): Eco = FDN con 8 líneas activas o sin late-diffusion, shimmer
-     con una sola cabeza, FFT del Spectral a 2048, oversampling del Saturator limitado a 2x; High = oversampling
-     4x, interpolación cúbica en todos los delays modulados.
-  3. Repetir benchmarks (`[.bench]`) y anotar resultados aquí; añadir un test que falle si la cadena típica supera
-     el 8 % en Release (opcional, solo en CI Linux).
-  4. Después: **F11 – QA y entrega** (pluginval nivel 10 en CI ya activo; README de instalación ya existe;
-     GitHub Releases con binarios; CLAP opcional vía `clap-juce-extensions`).
+- **F11 – QA y entrega:**
+  1. Revisar el resultado del CI del último push (Linux/Windows: build + tests + pluginval nivel 10). Arreglar lo
+     que falle en MSVC.
+  2. Releases: workflow `release.yml` que, al crear un tag `v*`, compile Win/Mac (Linux opcional), empaquete
+     `AETHERFALL-<ver>-Windows.zip` (VST3) y `AETHERFALL-<ver>-macOS.zip` (VST3 + AU + Standalone, firmados ad-hoc)
+     y los publique con `softprops/action-gh-release` (o `gh release`).
+  3. CLAP opcional: `clap-juce-extensions` vía FetchContent detrás de `AETHERFALL_BUILD_CLAP=OFF`.
+  4. Checklist manual para el usuario (no automatizable aquí): cargar en FL Studio 21/2024 (Mixer insert), duplicar
+     la instancia, cambiar sample rate/buffer en caliente, render offline, guardar/reabrir proyecto, automatizar
+     parámetros, probar en Ableton/Logic/Reaper. Documentarlo en `README.md` → sección "QA manual".
+  5. Pulido de sonido según escucha real (niveles de módulos y presets).
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
   runners macOS para repos privados o hay un límite de gasto). Revisar en GitHub → Settings → Billing, o hacer el
-  repo público. Linux/Windows validan igualmente (último build completo verificado: Linux y Windows en verde con
-  pluginval nivel 10).
+  repo público. Linux/Windows validan igualmente.
 - pluginval no se puede ejecutar dentro del contenedor de las sesiones de Claude (bloqueado por permisos);
   se valida en CI.
 - Ajustes de sonido pendientes de escucha real (no posible en el contenedor): niveles relativos de los módulos,
   carácter de los color modes, profundidades máximas de modulación, timbre del Drone y de las texturas, y el
   balance de cada preset de fábrica.
-- MIDI CC distintos de CC1 todavía no son fuente (solo mod wheel); añadir "MIDI CC n" configurable si hace falta.
+- MIDI CC distintos de CC1 todavía no son fuente (solo mod wheel).
 - GUI: renderizado OpenGL opcional del visualizador no implementado (software, 30 fps, solo visible).
 - Los atajos de teclado dependen de que el host entregue las teclas al plugin.
-- `glob_quality` existe como parámetro pero aún no cambia nada (F10).

@@ -262,3 +262,27 @@ TEST_CASE ("Processor CPU benchmark with a heavy chain", "[.bench]")
     const double secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
     WARN ("heavy 8-module chain + core: " << 100.0 * secs / (blocks * 256 / 48000.0) << " % of one core");
 }
+
+TEST_CASE ("Every quality mode processes a heavy chain cleanly", "[processor]")
+{
+    using aetherfall::ModuleType;
+    for (float quality : { 0.0f, 1.0f, 2.0f })
+    {
+        AetherfallProcessor p;
+        p.setPlayConfigDetails (2, 2, 48000.0, 512);
+        p.prepareToPlay (48000.0, 512);
+        auto order = aetherfall::chain::emptyOrder();
+        const ModuleType mods[] = { ModuleType::Spectral, ModuleType::Granular, ModuleType::Saturator, ModuleType::ModFX };
+        for (size_t i = 0; i < 4; ++i) order[i] = mods[i];
+        p.setChainOrder (order);
+        setParam (p, PID::GlobQuality, quality);
+        setParam (p, PID::CoreShimmer, 0.5f);
+
+        bool finite = false;
+        const float peak = runNoise (p, 48000.0, 1.0, 512, finite, false);
+        INFO ("quality " << quality);
+        REQUIRE (finite);
+        REQUIRE (peak <= 1.0f);
+        REQUIRE (p.getLatencySamples() == 4096);   // latency independent of quality
+    }
+}

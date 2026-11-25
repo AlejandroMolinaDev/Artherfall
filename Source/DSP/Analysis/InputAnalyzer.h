@@ -18,7 +18,7 @@ public:
     void reset();
 
     /** Analyses one chunk of the (stereo) input. */
-    void process (const float* left, const float* right, int numSamples) noexcept;
+    void process (const float* left, const float* right, int numSamples, bool trackPitch = true) noexcept;
 
     const AnalysisFrame& getFrame() const noexcept { return frame; }
 

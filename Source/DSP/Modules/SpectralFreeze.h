@@ -48,12 +48,17 @@ private:
     {
         std::vector<float> inRing;      // maxSize
         std::vector<float> outRing;     // 2 * maxSize (power of two)
-        std::vector<float> smearMag, frozenMag, prevOut, phaseAcc;
+        std::vector<float> smearMag, frozenMag, prevOut;
+        std::vector<float> frozenRe, frozenIm;   // per-bin unit phasors while frozen
     };
 
     void processFrame (Channel& c, const ModContext& ctx);
 
     std::unique_ptr<juce::dsp::FFT> fft11, fft12;
+    std::array<std::vector<float>, 2> rotRe, rotIm;   // per-bin phase advance per hop (2048 / 4096)
+    std::vector<float> tiltGain;
+    float cachedTilt = 1000.0f;
+    int cachedTiltSize = 0, framesSinceNormalise = 0;
     std::array<std::vector<float>, 2> windows;   // Hann for 2048 / 4096
     std::vector<float> fftData, mag, phase, work;
     std::array<Channel, 2> ch;

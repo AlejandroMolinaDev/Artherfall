@@ -69,8 +69,8 @@ void ReverseSwell::process (juce::AudioBuffer<float>& buffer, const ModContext& 
         const double dA = 2.0 * phase * segmentSamples;
         const double dB = 2.0 * phB * segmentSamples;
 
-        float wA = std::pow ((float) std::sin (pi * phase), 2.0f * p);
-        float wB = std::pow ((float) std::sin (pi * phB), 2.0f * p);
+        float wA = std::pow (sinCycles (0.5 * phase), 2.0f * p);
+        float wB = std::pow (sinCycles (0.5 * phB), 2.0f * p);
         // Normalise with the plain windows (constant level for any sharpness)...
         const float norm = 1.0f / std::max (wA + wB, 1.0e-4f);
         if (swell)

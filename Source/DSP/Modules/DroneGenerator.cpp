@@ -125,48 +125,51 @@ void DroneGenerator::process (juce::AudioBuffer<float>& buffer, const ModContext
     const int numOsc = voicing.count * oscPerNote;
     const float level = 0.35f / std::sqrt ((float) numOsc);
 
+    // Control rate: glide the note over the chunk and compute every oscillator
+    // increment once (no exp/pow per sample).
+    currentNote = targetNote + std::pow (glideCoeff, (double) n) * (currentNote - targetNote);
+    const float dtCents = detune.getTarget();
+    std::array<double, maxVoicingNotes * oscPerNote> inc {};
+    for (int v = 0; v < voicing.count; ++v)
+        for (int k = 0; k < oscPerNote; ++k)
+        {
+            const double cents = (k == 0 ? -1.0 : 1.0) * dtCents * 0.5;
+            inc[(size_t) (v * oscPerNote + k)] = std::min (0.45, noteToHz (currentNote + voicing.notes[v] + cents / 100.0) / sampleRate);
+        }
+    detune.skip (n);
+
     for (int i = 0; i < n; ++i)
     {
-        currentNote = targetNote + glideCoeff * (currentNote - targetNote);
         logCutoff = cutTarget + cutCoeff * (logCutoff - cutTarget);
         onsetGain = onsetTarget + onsetCoeff * (onsetGain - onsetTarget);
 
-        const float wv = wave.next(), nz = noise.next(), fl = follow.next(), dt = detune.next();
+        const float wv = wave.next(), nz = noise.next(), fl = follow.next();
 
         float outL = 0.0f, outR = 0.0f;
-        for (int v = 0; v < voicing.count; ++v)
+        for (int o = 0; o < numOsc; ++o)
         {
-            for (int k = 0; k < oscPerNote; ++k)
-            {
-                const auto idx = (size_t) (v * oscPerNote + k);
-                const double cents = (k == 0 ? -1.0 : 1.0) * dt * 0.5;
-                const double f = noteToHz (currentNote + voicing.notes[v] + cents / 100.0);
-                const double inc = std::min (0.45, f / sampleRate);
+            double& ph = oscPhase[(size_t) o];
+            const double dt = inc[(size_t) o];
+            ph += dt;
+            if (ph >= 1.0) ph -= 1.0;
 
-                double& ph = oscPhase[idx];
-                ph += inc;
-                if (ph >= 1.0) ph -= 1.0;
-
-                const double sine = std::sin (twoPi * ph);
-                const double saw = 2.0 * ph - 1.0 - polyBlep (ph, inc);
-                const float s = (float) (sine + (double) wv * (saw - sine));
-
-                if (k == 0) outL += s; else outR += s;
-            }
+            const float sine = sinCycles (ph);
+            const float saw = (float) (2.0 * ph - 1.0 - polyBlep (ph, dt));
+            const float s = sine + wv * (saw - sine);
+            if ((o & 1) == 0) outL += s; else outR += s;
         }
 
         // Noise layer (pink-ish, one-pole each side).
         pinkState[0] = 0.97f * pinkState[0] + 0.03f * rng.nextBipolar() * 6.0f;
         pinkState[1] = 0.97f * pinkState[1] + 0.03f * rng.nextBipolar() * 6.0f;
 
-        const float fc = (float) std::exp (logCutoff);
         const float amp = level * onsetGain * (1.0f + fl * (std::min (1.0f, env * 6.0f) - 1.0f));
 
         float sides[2] = { outL + nz * pinkState[0] * 2.0f, outR + nz * pinkState[1] * 2.0f };
         for (int c = 0; c < 2; ++c)
         {
-            if ((i & 7) == 0)
-                filter[(size_t) c].setParams (fc, res, (float) sampleRate);
+            if ((i & 15) == 0)
+                filter[(size_t) c].setParams ((float) std::exp (logCutoff), res, (float) sampleRate);
             x[c][i] = amp * filter[(size_t) c].processLP (sides[c]);
         }
     }

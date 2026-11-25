@@ -60,6 +60,23 @@ template <typename T> inline T softSat (T x) noexcept
     return x * (T (27) + x2) / (T (27) + T (9) * x2);
 }
 
+/** sin(2*pi*cycles) for any real `cycles`, without std::sin: range reduction
+    to a quarter period + 7th-order odd polynomial (max error ~2e-4). Meant for
+    LFOs and oscillators that run per sample. */
+inline float sinCycles (double cycles) noexcept
+{
+    double p = cycles - std::floor (cycles);       // [0, 1)
+    float x = (float) (p < 0.5 ? p : p - 1.0);     // [-0.5, 0.5)
+    if (x > 0.25f)       x = 0.5f - x;
+    else if (x < -0.25f) x = -0.5f - x;            // [-0.25, 0.25]
+    const float t = x * 6.2831853f;                // [-pi/2, pi/2]
+    const float t2 = t * t;
+    return t * (1.0f + t2 * (-0.16666667f + t2 * (0.0083333333f - t2 * 0.00019841270f)));
+}
+
+/** cos(2*pi*cycles), same approximation. */
+inline float cosCycles (double cycles) noexcept { return sinCycles (cycles + 0.25); }
+
 /** Cubic soft clipper: linear near zero, smoothly saturates to +-1 at |x| = 1.5. */
 template <typename T> inline T softClipCubic (T x) noexcept
 {

@@ -74,8 +74,12 @@ void ModulationEngine::process (const float* base, float* effective, const Chunk
     const float* prev = effective;
 
     // --- Analyzer.
+    // Pitch tracking (YIN) only runs when something uses it.
+    bool needsPitch = base[idx (PID::CombTrack)] >= 0.5f;
+    for (const auto& slot : r.slots)
+        needsPitch = needsPitch || (slot.dest >= 0 && (slot.source == ModSource::AnalyzerPitch || slot.via == ModSource::AnalyzerPitch));
     if (in.inL != nullptr && in.inR != nullptr)
-        analyzer.process (in.inL, in.inR, n);
+        analyzer.process (in.inL, in.inR, n, needsPitch);
     const bool onset = analyzer.hadOnset();
 
     // --- LFOs.

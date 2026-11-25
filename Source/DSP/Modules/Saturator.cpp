@@ -59,7 +59,10 @@ void Saturator::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx
         return;
 
     const int mode = ctx.getChoice (PID::SatMode);
-    oversampler.setFactorIndex (ctx.getChoice (PID::SatOversample));
+    // Quality: Eco = no oversampling, Normal = as set, High = 4x.
+    const int quality = ctx.getChoice (PID::GlobQuality);
+    const int osIndex = quality == 0 ? 0 : (quality == 2 ? 2 : ctx.getChoice (PID::SatOversample));
+    oversampler.setFactorIndex (osIndex);
 
     // Drive 0..1 -> 0..+36 dB, bias up to 0.5 of DC offset before the curve.
     const float drive = dbToGain (36.0f * clamp (ctx.get (PID::SatDrive), 0.0f, 1.0f));

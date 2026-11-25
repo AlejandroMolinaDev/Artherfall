@@ -20,6 +20,21 @@ void SpectralFreeze::prepareModule()
             win[(size_t) i] = (float) (0.5 - 0.5 * std::cos (twoPi * i / n));   // periodic Hann
     }
 
+    // Phase advance of every bin during one hop (hop = n / 4): 2*pi*k*hop/n = pi*k/2.
+    for (int w = 0; w < 2; ++w)
+    {
+        const int n = 2048 << w, bins = n / 2 + 1;
+        rotRe[(size_t) w].resize ((size_t) bins);
+        rotIm[(size_t) w].resize ((size_t) bins);
+        for (int k = 0; k < bins; ++k)
+        {
+            const double a = twoPi * (double) k * (n / 4) / n;
+            rotRe[(size_t) w][(size_t) k] = (float) std::cos (a);
+            rotIm[(size_t) w][(size_t) k] = (float) std::sin (a);
+        }
+    }
+    tiltGain.assign ((size_t) maxSize / 2 + 1, 1.0f);
+
     fftData.assign ((size_t) maxSize * 2, 0.0f);
     mag.assign ((size_t) maxSize / 2 + 1, 0.0f);
     phase.assign ((size_t) maxSize / 2 + 1, 0.0f);
@@ -35,7 +50,8 @@ void SpectralFreeze::prepareModule()
         c.smearMag.assign ((size_t) maxSize / 2 + 1, 0.0f);
         c.frozenMag.assign ((size_t) maxSize / 2 + 1, 0.0f);
         c.prevOut.assign ((size_t) maxSize / 2 + 1, 0.0f);
-        c.phaseAcc.assign ((size_t) maxSize / 2 + 1, 0.0f);
+        c.frozenRe.assign ((size_t) maxSize / 2 + 1, 1.0f);
+        c.frozenIm.assign ((size_t) maxSize / 2 + 1, 0.0f);
     }
     reset();
 }
@@ -49,7 +65,8 @@ void SpectralFreeze::reset()
         std::fill (c.smearMag.begin(), c.smearMag.end(), 0.0f);
         std::fill (c.frozenMag.begin(), c.frozenMag.end(), 0.0f);
         std::fill (c.prevOut.begin(), c.prevOut.end(), 0.0f);
-        std::fill (c.phaseAcc.begin(), c.phaseAcc.end(), 0.0f);
+        std::fill (c.frozenRe.begin(), c.frozenRe.end(), 1.0f);
+        std::fill (c.frozenIm.begin(), c.frozenIm.end(), 0.0f);
     }
     inWrite = hopCounter = 0;
     sampleCounter = 0;
@@ -60,7 +77,8 @@ void SpectralFreeze::processFrame (Channel& c, const ModContext& ctx)
 {
     const int n = size;
     const int bins = n / 2 + 1;
-    const auto& win = windows[size == 2048 ? 0 : 1];
+    const int sizeIdx = size == 2048 ? 0 : 1;
+    const auto& win = windows[(size_t) sizeIdx];
     auto& fft = size == 2048 ? *fft11 : *fft12;
 
     // Latest n input samples in chronological order, windowed.
@@ -70,12 +88,11 @@ void SpectralFreeze::processFrame (Channel& c, const ModContext& ctx)
 
     fft.performRealOnlyForwardTransform (fftData.data(), true);
 
+    // Magnitudes; the phase is kept as a unit phasor (re, im) / |X| in `phase`
+    // pairs, so no atan2 / sin / cos per bin is needed.
     for (int k = 0; k < bins; ++k)
-    {
-        const float re = fftData[(size_t) (2 * k)], im = fftData[(size_t) (2 * k + 1)];
-        mag[(size_t) k] = std::sqrt (re * re + im * im);
-        phase[(size_t) k] = std::atan2 (im, re);
-    }
+        mag[(size_t) k] = std::sqrt (fftData[(size_t) (2 * k)] * fftData[(size_t) (2 * k)]
+                                     + fftData[(size_t) (2 * k + 1)] * fftData[(size_t) (2 * k + 1)]);
 
     const float smear = clamp (ctx.get (PID::SpecSmear), 0.0f, 1.0f);
     const float blur = clamp (ctx.get (PID::SpecBlur), 0.0f, 1.0f);
@@ -91,7 +108,16 @@ void SpectralFreeze::processFrame (Channel& c, const ModContext& ctx)
         c.smearMag[(size_t) k] = alpha * c.smearMag[(size_t) k] + (1.0f - alpha) * mag[(size_t) k];
 
     if (frozen && ! wasFrozen)
+    {
+        // Capture the spectrum and the current phases.
         std::copy (c.smearMag.begin(), c.smearMag.begin() + bins, c.frozenMag.begin());
+        for (int k = 0; k < bins; ++k)
+        {
+            const float m = mag[(size_t) k];
+            c.frozenRe[(size_t) k] = m > 1.0e-12f ? fftData[(size_t) (2 * k)] / m : 1.0f;
+            c.frozenIm[(size_t) k] = m > 1.0e-12f ? fftData[(size_t) (2 * k + 1)] / m : 0.0f;
+        }
+    }
 
     const auto& base = frozen ? c.frozenMag : c.smearMag;
 
@@ -107,15 +133,23 @@ void SpectralFreeze::processFrame (Channel& c, const ModContext& ctx)
             work[(size_t) k] = work[(size_t) (k + 1)] + b * (work[(size_t) k] - work[(size_t) (k + 1)]);
     }
 
-    // --- Tilt around 1 kHz (+-6 dB per decade at full tilt).
-    const float kRef = 1000.0f * (float) n / (float) sampleRate;
-    double eBase = 0.0, eOut = 0.0;
+    // --- Tilt around 1 kHz (+-6 dB per decade at full tilt); gains cached.
+    const bool useTilt = std::abs (tilt) > 1.0e-3f;
+    if (useTilt && (std::abs (tilt - cachedTilt) > 1.0e-3f || cachedTiltSize != n))
+    {
+        const float kRef = 1000.0f * (float) n / (float) sampleRate;
+        for (int k = 0; k < bins; ++k)
+            tiltGain[(size_t) k] = std::pow (std::max (1.0f, (float) k) / kRef, 0.3f * tilt);
+        cachedTilt = tilt;
+        cachedTiltSize = n;
+    }
 
+    double eBase = 0.0, eOut = 0.0;
     for (int k = 0; k < bins; ++k)
     {
         float m = work[(size_t) k];
-        if (std::abs (tilt) > 1.0e-3f)
-            m *= std::pow (std::max (1.0f, (float) k) / kRef, 0.3f * tilt);
+        if (useTilt)
+            m *= tiltGain[(size_t) k];
 
         // --- Shimmer: previous output shifted by the ratio, fed back.
         if (shimmer > 1.0e-3f)
@@ -137,27 +171,61 @@ void SpectralFreeze::processFrame (Channel& c, const ModContext& ctx)
     // Keep the shimmer feedback from accumulating beyond ~+6 dB.
     if (eOut > 4.0 * eBase && eOut > 0.0)
     {
-        const float s = (float) std::sqrt (4.0 * eBase / eOut);
+        const float sc = (float) std::sqrt (4.0 * eBase / eOut);
         for (int k = 0; k < bins; ++k)
-            work[(size_t) k] *= s;
+            work[(size_t) k] *= sc;
     }
     std::copy (work.begin(), work.begin() + bins, c.prevOut.begin());
 
-    // --- Phases: input phase while live; advancing phase while frozen.
+    // --- Phases: the input phasor while live; while frozen every bin keeps
+    //     rotating at its own frequency (rotation table), optionally randomised.
+    const auto& rre = rotRe[(size_t) sizeIdx];
+    const auto& rim = rotIm[(size_t) sizeIdx];
+    const bool renormalise = ++framesSinceNormalise >= 64;
+    if (renormalise)
+        framesSinceNormalise = 0;
+
     for (int k = 0; k < bins; ++k)
     {
-        c.phaseAcc[(size_t) k] += (float) (twoPi * (double) k * hop / n);
-        if (c.phaseAcc[(size_t) k] > (float) twoPi * 64.0f)
-            c.phaseAcc[(size_t) k] = std::fmod (c.phaseAcc[(size_t) k], (float) twoPi);
+        float ur, ui;
+        if (frozen)
+        {
+            const float r0 = c.frozenRe[(size_t) k], i0 = c.frozenIm[(size_t) k];
+            ur = r0 * rre[(size_t) k] - i0 * rim[(size_t) k];
+            ui = r0 * rim[(size_t) k] + i0 * rre[(size_t) k];
+            if (renormalise)
+            {
+                const float len = std::sqrt (ur * ur + ui * ui);
+                if (len > 1.0e-6f) { ur /= len; ui /= len; }
+            }
+            c.frozenRe[(size_t) k] = ur;
+            c.frozenIm[(size_t) k] = ui;
+        }
+        else
+        {
+            const float m = mag[(size_t) k];
+            ur = m > 1.0e-12f ? fftData[(size_t) (2 * k)] / m : 1.0f;
+            ui = m > 1.0e-12f ? fftData[(size_t) (2 * k + 1)] / m : 0.0f;
+        }
 
-        float ph = frozen ? c.phaseAcc[(size_t) k] : phase[(size_t) k];
         if (phaseRand > 1.0e-3f)
-            ph += phaseRand * (float) pi * rng.nextBipolar();
-        if (k == 0 || k == bins - 1)
-            ph = 0.0f;
+        {
+            // Rotate by a random angle in +-pi * phaseRand.
+            const double turns = 0.5 * (double) phaseRand * (double) rng.nextBipolar();
+            const float cr = cosCycles (turns), sr = sinCycles (turns);
+            const float nr = ur * cr - ui * sr;
+            ui = ur * sr + ui * cr;
+            ur = nr;
+        }
 
-        fftData[(size_t) (2 * k)]     = work[(size_t) k] * std::cos (ph);
-        fftData[(size_t) (2 * k + 1)] = work[(size_t) k] * std::sin (ph);
+        if (k == 0 || k == bins - 1)
+        {
+            ur = 1.0f;   // DC and Nyquist must stay real
+            ui = 0.0f;
+        }
+
+        fftData[(size_t) (2 * k)]     = work[(size_t) k] * ur;
+        fftData[(size_t) (2 * k + 1)] = work[(size_t) k] * ui;
     }
 
     fft.performRealOnlyInverseTransform (fftData.data());
@@ -176,7 +244,8 @@ void SpectralFreeze::process (juce::AudioBuffer<float>& buffer, const ModContext
     if (n <= 0)
         return;
 
-    const int newSize = ctx.getChoice (PID::SpecFFT) == 0 ? 2048 : 4096;
+    // Eco quality forces the smaller FFT (the reported latency does not change).
+    const int newSize = (ctx.getChoice (PID::SpecFFT) == 0 || ctx.getChoice (PID::GlobQuality) == 0) ? 2048 : 4096;
     if (newSize != size)
     {
         size = newSize;

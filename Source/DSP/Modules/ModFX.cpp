@@ -33,7 +33,7 @@ void ModFX::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx)
 
     const int mode = ctx.getChoice (PID::MfxMode);
     const int numStages = clamp ((int) std::lround (ctx.get (PID::MfxStages)), 2, maxStages);
-    const int numVoices = clamp (numStages / 2, 1, maxVoices);
+    const int numVoices = clamp (numStages / 2, 1, ctx.getChoice (PID::GlobQuality) == 0 ? 3 : maxVoices);
 
     if (mode != lastMode)
     {
@@ -70,16 +70,21 @@ void ModFX::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx)
         for (int c = 0; c < 2; ++c)
         {
             const double p = c == 0 ? ph : phR;
-            const float lfoVal = (float) std::sin (twoPi * p);
+            const float lfoVal = sinCycles (p);
             const float in = x[c][i];
             float out = 0.0f;
 
             if (mode == 0)   // ---------------------------------------------- Phaser
             {
                 // Centre 200 Hz..4 kHz, swept +- 2 octaves at full depth.
-                const float fc = 200.0f * std::exp2 (4.32f * ce + 2.0f * d * lfoVal);
-                const float t = std::tan ((float) pi * clamp (fc, 20.0f, sr * 0.45f) / sr);
-                const float a = (t - 1.0f) / (t + 1.0f);
+                // All-pass coefficient refreshed every 4 samples (tan is costly).
+                if ((i & 3) == 0)
+                {
+                    const float fc = 200.0f * std::exp2 (4.32f * ce + 2.0f * d * lfoVal);
+                    const float t = std::tan ((float) pi * clamp (fc, 20.0f, sr * 0.45f) / sr);
+                    phaserCoeff[(size_t) c] = (t - 1.0f) / (t + 1.0f);
+                }
+                const float a = phaserCoeff[(size_t) c];
 
                 float s = in + fb * fbState[(size_t) c];
                 for (int k = 0; k < numStages; ++k)
@@ -108,7 +113,7 @@ void ModFX::process (juce::AudioBuffer<float>& buffer, const ModContext& ctx)
                 for (int v = 0; v < numVoices; ++v)
                 {
                     const double vp = p + (double) v / numVoices;
-                    const float lv = (float) std::sin (twoPi * vp);
+                    const float lv = sinCycles (vp);
                     const float delayMs = baseMs + 6.0f * d * lv * (0.7f + 0.3f * (float) (v & 1));
                     // Odd voices lean to the opposite side for an ensemble spread.
                     const float pan = ((v & 1) == (c & 1)) ? 1.0f : 0.55f;
