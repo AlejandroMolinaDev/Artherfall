@@ -1,18 +1,25 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_extra/juce_gui_extra.h>
+
+#include "GUI/LookAndFeel/AetherLookAndFeel.h"
+#include "GUI/Components/ParamWidgets.h"
 
 namespace aetherfall
 {
 
 class AetherfallProcessor;
 
-/** Development editor until the real GUI lands (phase F7):
-    product header, 8 chain-slot selectors and the generic parameter list. */
-class AetherfallEditor final : public juce::AudioProcessorEditor,
-                               private juce::Timer
+/**
+    Main editor. All views are laid out at the base size (1000 x 640) inside a
+    content component that is scaled with an AffineTransform, so the UI stays
+    vector-sharp from 75 % to 200 %. The chosen scale is saved in the plug-in
+    state (UI node) and restored when the editor reopens.
+*/
+class AetherfallEditor final : public juce::AudioProcessorEditor
 {
 public:
     explicit AetherfallEditor (AetherfallProcessor&);
@@ -21,15 +28,28 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    static constexpr int baseWidth = 1000, baseHeight = 640, headerHeight = 56;
+
+    enum class Tab { Main = 0, Chain, Core, Mod, Output };
+    void showTab (Tab);
+    Tab getCurrentTab() const noexcept { return currentTab; }
+
+    /** The scaled content (exposed for snapshot tests). */
+    juce::Component& getContent() noexcept { return content; }
+
 private:
-    void timerCallback() override;
-    void slotChanged();
-    void refreshSlotsFromProcessor();
+    class Header;
+    void saveScale (float scale);
+    float loadScale() const;
 
     AetherfallProcessor& processor;
-    std::array<juce::ComboBox, 8> slots;
-    juce::GenericAudioProcessorEditor generic;
-    bool updatingSlots = false;
+    AetherLookAndFeel lookAndFeel;
+    juce::TooltipWindow tooltips { this, 600 };
+
+    juce::Component content;
+    std::unique_ptr<Header> header;
+    std::array<std::unique_ptr<juce::Component>, 5> views;
+    Tab currentTab = Tab::Main;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AetherfallEditor)
 };

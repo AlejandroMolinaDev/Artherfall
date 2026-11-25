@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F6 – Output Stage (+ Input Stage) **terminada** → siguiente: **F7 – GUI base**.
+- **Fase:** F7 – GUI base **terminada** → siguiente: **F8 – GUI avanzada**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -103,26 +103,41 @@
 - **Tests: 71 casos, todos verdes** (+ ducking > 6 dB y recuperación total, limitador ≤ ceiling con +12 dB,
   glue > 10 dB de reducción, tilt/HPF/LPF/width, input HPF/bass mono/gain, procesador nunca supera −0.3 dBFS).
 
+- **F7 – GUI base** (`Source/GUI/`):
+  - `LookAndFeel/AetherLookAndFeel` (paleta oscura + acento, knobs de arco vectoriales con modo bipolar y macro,
+    toggles tipo píldora, combos, tooltips).
+  - `Components/ParamWidgets` (`Knob` con valor al pasar el ratón, doble clic = default, Ctrl/Cmd = fino;
+    `ChoiceBox`, `ToggleSwitch`, `Section`, `createParamWidget()`, `layoutGrid()`), `Components/Meters`
+    (medidor estéreo con peak hold, GR, correlación; timers solo con la vista visible).
+  - `Visualizer/AtmosphereView` (niebla + partículas que reaccionan al nivel de salida, 30 fps, versión básica).
+  - `Views/BasicViews` (MAIN: macros, global, quick knobs, mix + medidores; CORE; OUTPUT con GR y medidores),
+    `Views/ChainView` (8 slots con selector de módulo, on/mix/solo/parallel, drag & drop para mover, panel de
+    parámetros del slot seleccionado, editor de patrón del Trance Gate), `Views/ModView` (placeholder para F8).
+  - `PluginEditor`: cabecera con logo, pestañas MAIN/CHAIN/CORE/MOD/OUTPUT y bypass; escalado 75–200 % con
+    aspecto fijo; escala y pestaña guardadas en el nodo `UI`.
+- **Tests: 72 casos, todos verdes** (+ editor abre/redimensiona/cierra y recuerda la escala). Capturas: test
+  oculto `[.gui]`.
+
 ## A medias
-- Nada a medias. El DSP de las fases F1–F6 está completo; falta toda la GUI real (F7–F8) y los presets (F9).
+- Nada a medias.
 
 ## Siguiente paso exacto
-- **F7 – GUI base** (`Source/GUI/`), sustituyendo el editor provisional:
-  1. `LookAndFeel/AetherLookAndFeel.{h,cpp}`: paleta oscura, color de acento (por categoría de preset), knobs
-     vectoriales (arco + valor), botones, combos, tabs; fuentes del sistema (o una fuente embebida vía
-     `juce_add_binary_data` más adelante).
-  2. `Components/`: `Knob` (Slider rotatorio + label + valor, doble clic = default, Ctrl/Cmd+arrastre = fino,
-     tooltip; adjunto al APVTS con `SliderAttachment`), `MacroKnob` (grande), `Toggle`, `ChoiceBox`,
-     `SlotView` (un slot de la cadena: tipo, on, mix, solo, parallel, expandible con los parámetros del módulo
-     generados desde `moduleInfos[...].firstParam..lastParam`), `Meters` (lee `getMeters()` con un Timer 30 Hz).
-  3. `Views/`: `MainView` (4 macros, Dry/Wet, Width, Ducking, Output, zona central reservada para el visualizador
-     de F8), `ChainView` (8 slots en fila, drag & drop para reordenar → `setChainOrder()`), `CoreView` (todos los
-     parámetros `core_*`), `OutputView` (`in_*` + `out_*` + medidores). La vista MOD llega en F8.
-  4. `PluginEditor`: barra superior (logo, tabs, selector de preset placeholder, A/B y undo en F8), redimensionable
-     75–200 % con `setResizeLimits` + `AffineTransform`/escalado de layout, tamaño base 1000×640, guardar la
-     escala en el estado (`UI` node).
-  5. Probar en Standalone (Xvfb en el contenedor para capturas: `apt-get install xvfb`) — capturas con
-     `juce::Component::createComponentSnapshot` en un test oculto `[.gui]` si no hay display.
+- **F8 – GUI avanzada**:
+  1. `Views/ModView`: editores de LFO (forma, rate/sync/div, fase, retrig, polaridad, smooth; editor de puntos de
+     la forma custom → `setLfoShape()`), envolventes, secuenciadores (barras editables → `setSeqSteps()`), chaos,
+     macros (lista de destinos/cantidades → `setMacroTarget()`), matriz de 32 slots (fuente, destino, cantidad,
+     curva, vía → `setModSlot()`).
+  2. Drag & drop de fuentes a knobs (estilo Serum/Vital): las fuentes son `DragAndDropContainer` sources; el
+     `Knob` acepta el drop y asigna el primer slot libre de la matriz con cantidad por defecto; anillo de color
+     alrededor del knob con la cantidad y el valor modulado en tiempo real (leer el valor efectivo: exponer un
+     array atómico de valores efectivos desde `ModulationEngine`).
+  3. Undo/Redo (≥ 50 pasos): `juce::UndoManager` en el procesador pasado al APVTS (hoy `nullptr`) y a los writers
+     de estado (`setChainOrder`, `setModSlot`... ya aceptan `UndoManager*`), botones en la cabecera + Ctrl/Cmd+Z.
+  4. A/B: dos copias del estado completo, botón A/B y "copiar A→B".
+  5. Randomize inteligente por sección con intensidad.
+  6. Visualizador mejorado (granos como puntos del Granular, decay como niebla) + analizador de espectro del wet
+     (FIFO lock-free desde el procesador + FFT en el hilo de mensajes).
+  7. Revisar fps (< 60), sin fugas al abrir/cerrar (leak detector en Debug).
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
@@ -135,3 +150,4 @@
 - CPU de la cadena extrema 9.3 % (> 8 % objetivo para preset típico; el típico está en 4.3 %). Candidatos F10:
   trig por muestra en ModFX/Stereo/Drone (usar fasores), Spectral (atan2/sin/cos por bin), Granular (ventanas).
 - MIDI CC distintos de CC1 todavía no son fuente (solo mod wheel); añadir "MIDI CC n" configurable si hace falta.
+- GUI: el selector de presets de la cabecera llega en F9; la vista MOD es un placeholder hasta F8.

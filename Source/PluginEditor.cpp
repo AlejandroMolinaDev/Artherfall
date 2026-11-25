@@ -1,115 +1,156 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "PluginInfo.h"
-#include "DSP/Modules/ModuleFactory.h"
+#include "GUI/Views/BasicViews.h"
+#include "GUI/Views/ChainView.h"
+#include "GUI/Views/ModView.h"
 
 namespace aetherfall
 {
 
-static constexpr int baseWidth  = 1000;
-static constexpr int baseHeight = 640;
-static constexpr int headerHeight = 56;
-static constexpr int chainRowHeight = 44;
-
-AetherfallEditor::AetherfallEditor (AetherfallProcessor& p)
-    : AudioProcessorEditor (p), processor (p), generic (p)
+namespace
 {
-    for (size_t i = 0; i < slots.size(); ++i)
+    const juce::Identifier uiNode { "UI" }, scaleProp { "scale" }, tabProp { "tab" };
+}
+
+//==============================================================================
+/** Top bar: logo, view tabs, bypass. */
+class AetherfallEditor::Header final : public juce::Component
+{
+public:
+    Header (AetherfallEditor& e, juce::AudioProcessorValueTreeState& apvts) : editor (e)
     {
-        auto& box = slots[i];
-        box.addItem ("-", 1);
-        for (int t = 1; t <= numModuleTypes; ++t)
+        static const char* names[] = { "MAIN", "CHAIN", "CORE", "MOD", "OUTPUT" };
+        for (size_t i = 0; i < tabs.size(); ++i)
         {
-            const auto& mi = moduleInfo ((ModuleType) t);
-            juce::String name (std::string (mi.name));
-            if (! isModuleImplemented ((ModuleType) t))
-                name << " (F4)";
-            box.addItem (name, t + 1);
+            auto& b = tabs[i];
+            b.setButtonText (names[i]);
+            b.setClickingTogglesState (false);
+            b.onClick = [this, i] { editor.showTab ((Tab) i); };
+            addAndMakeVisible (b);
         }
-        box.setTooltip ("Chain slot " + juce::String ((int) i + 1));
-        box.onChange = [this] { slotChanged(); };
-        addAndMakeVisible (box);
+        bypass = std::make_unique<ToggleSwitch> (apvts, PID::Bypass, "Bypass");
+        addAndMakeVisible (*bypass);
     }
 
-    addAndMakeVisible (generic);
-    refreshSlotsFromProcessor();
-    startTimerHz (4);
+    void setActive (Tab t)
+    {
+        for (size_t i = 0; i < tabs.size(); ++i)
+            tabs[i].setToggleState ((int) i == (int) t, juce::dontSendNotification);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds();
+        g.setColour (palette::panel);
+        g.fillRect (r);
+        g.setColour (palette::outline);
+        g.drawHorizontalLine (r.getBottom() - 1, 0.0f, (float) r.getWidth());
+
+        auto* lf = dynamic_cast<AetherLookAndFeel*> (&getLookAndFeel());
+        const auto accent = lf != nullptr ? lf->getAccent() : palette::accentDefault;
+        auto logo = r.removeFromLeft (220).reduced (18, 0);
+        juce::ColourGradient grad (palette::text, (float) logo.getX(), 0.0f, accent, (float) logo.getRight(), 0.0f, false);
+        g.setGradientFill (grad);
+        g.setFont (AetherLookAndFeel::font (22.0f, true));
+        g.drawText ("AETHERFALL", logo, juce::Justification::centredLeft);
+
+        g.setColour (palette::textDim);
+        g.setFont (AetherLookAndFeel::font (11.0f));
+        g.drawText (juce::String ("v") + product::version, r.removeFromRight (190).withTrimmedRight (110),
+                    juce::Justification::centredRight);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (0, 12);
+        r.removeFromLeft (230);
+        bypass->setBounds (r.removeFromRight (110).reduced (8, 0));
+        r.removeFromRight (90);
+        for (auto& b : tabs)
+            b.setBounds (r.removeFromLeft (92).reduced (3, 0));
+    }
+
+private:
+    AetherfallEditor& editor;
+    std::array<juce::TextButton, 5> tabs;
+    std::unique_ptr<ToggleSwitch> bypass;
+};
+
+//==============================================================================
+AetherfallEditor::AetherfallEditor (AetherfallProcessor& p)
+    : AudioProcessorEditor (p), processor (p)
+{
+    setLookAndFeel (&lookAndFeel);
+    auto& apvts = processor.getValueTreeState();
+
+    header = std::make_unique<Header> (*this, apvts);
+    content.addAndMakeVisible (*header);
+
+    views[(size_t) Tab::Main]   = std::make_unique<MainView> (processor, apvts);
+    views[(size_t) Tab::Chain]  = std::make_unique<ChainView> (processor, apvts);
+    views[(size_t) Tab::Core]   = std::make_unique<CoreView> (apvts);
+    views[(size_t) Tab::Mod]    = std::make_unique<ModView> (processor);
+    views[(size_t) Tab::Output] = std::make_unique<OutputView> (processor, apvts);
+    for (auto& v : views)
+        content.addChildComponent (*v);
+
+    addAndMakeVisible (content);
+    content.setBounds (0, 0, baseWidth, baseHeight);
+    header->setBounds (0, 0, baseWidth, headerHeight);
+    for (auto& v : views)
+        v->setBounds (0, headerHeight, baseWidth, baseHeight - headerHeight);
+
+    const auto ui = processor.getValueTreeState().state.getChildWithName (uiNode);
+    showTab ((Tab) juce::jlimit (0, 4, (int) ui.getProperty (tabProp, 0)));
 
     setResizable (true, true);
     setResizeLimits (baseWidth * 3 / 4, baseHeight * 3 / 4, baseWidth * 2, baseHeight * 2);
-    setSize (baseWidth, baseHeight);
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio ((double) baseWidth / (double) baseHeight);
+
+    const float scale = loadScale();
+    setSize (juce::roundToInt (baseWidth * scale), juce::roundToInt (baseHeight * scale));
 }
 
-AetherfallEditor::~AetherfallEditor() = default;
-
-void AetherfallEditor::refreshSlotsFromProcessor()
+AetherfallEditor::~AetherfallEditor()
 {
-    const auto order = processor.getChainOrder();
-    updatingSlots = true;
-    for (size_t i = 0; i < slots.size(); ++i)
-        slots[i].setSelectedId ((int) order[i] + 1, juce::dontSendNotification);
-    updatingSlots = false;
+    setLookAndFeel (nullptr);
 }
 
-void AetherfallEditor::slotChanged()
+void AetherfallEditor::showTab (Tab t)
 {
-    if (updatingSlots)
-        return;
+    currentTab = t;
+    for (size_t i = 0; i < views.size(); ++i)
+        views[i]->setVisible ((int) i == (int) t);
+    header->setActive (t);
 
-    auto order = chain::emptyOrder();
-    for (size_t i = 0; i < slots.size(); ++i)
-        order[i] = (ModuleType) std::max (0, slots[i].getSelectedId() - 1);
-
-    processor.setChainOrder (order);   // duplicates are removed here...
-    refreshSlotsFromProcessor();        // ...and the UI shows the result
+    auto ui = processor.getValueTreeState().state.getOrCreateChildWithName (uiNode, nullptr);
+    ui.setProperty (tabProp, (int) t, nullptr);
 }
 
-void AetherfallEditor::timerCallback()
+float AetherfallEditor::loadScale() const
 {
-    // Reflect state changes coming from the host (project/preset load).
-    const auto order = processor.getChainOrder();
-    for (size_t i = 0; i < slots.size(); ++i)
-        if (slots[i].getSelectedId() != (int) order[i] + 1)
-        {
-            refreshSlotsFromProcessor();
-            break;
-        }
+    const auto ui = processor.getValueTreeState().state.getChildWithName (uiNode);
+    return juce::jlimit (0.75f, 2.0f, (float) ui.getProperty (scaleProp, 1.0f));
+}
+
+void AetherfallEditor::saveScale (float scale)
+{
+    auto ui = processor.getValueTreeState().state.getOrCreateChildWithName (uiNode, nullptr);
+    ui.setProperty (scaleProp, scale, nullptr);
 }
 
 void AetherfallEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff0d0f14));
-
-    auto header = getLocalBounds().removeFromTop (headerHeight);
-    g.setColour (juce::Colour (0xff151922));
-    g.fillRect (header);
-
-    g.setColour (juce::Colour (0xffb9c6ff));
-    g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    g.drawText (product::name, header.reduced (20, 0), juce::Justification::centredLeft);
-
-    g.setColour (juce::Colours::white.withAlpha (0.45f));
-    g.setFont (juce::FontOptions (13.0f));
-    g.drawText (juce::String ("v") + product::version + "  -  dev build (GUI arrives in F7)",
-                header.reduced (20, 0), juce::Justification::centredRight);
-
-    auto row = getLocalBounds().withTrimmedTop (headerHeight).removeFromTop (chainRowHeight);
-    g.setColour (juce::Colours::white.withAlpha (0.6f));
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("CHAIN", row.removeFromLeft (70).reduced (12, 0), juce::Justification::centredLeft);
+    g.fillAll (palette::background);
 }
 
 void AetherfallEditor::resized()
 {
-    auto area = getLocalBounds().withTrimmedTop (headerHeight);
-    auto row = area.removeFromTop (chainRowHeight).reduced (8, 8);
-    row.removeFromLeft (62);
-
-    const int w = row.getWidth() / (int) slots.size();
-    for (auto& box : slots)
-        box.setBounds (row.removeFromLeft (w).reduced (3, 0));
-
-    generic.setBounds (area);
+    const float scale = juce::jlimit (0.5f, 2.5f, (float) getWidth() / (float) baseWidth);
+    content.setTransform (juce::AffineTransform::scale (scale));
+    saveScale (scale);
 }
 
 } // namespace aetherfall

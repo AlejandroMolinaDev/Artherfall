@@ -163,3 +163,15 @@ Formato: fecha · decisión · motivo.
   desvanecen (sin desfase). Medidores en `Meters` (atomics) para la GUI.
 - **Motivo:** el limitador sin lookahead no añade latencia y garantiza el techo (verificado por test); el ducker
   sobre la señal seca alineada mantiene la coherencia cuando el Spectral añade latencia.
+
+### 2026-11-25 · GUI: escalado por AffineTransform y estado de UI en el ValueTree
+- **Decisión:** todas las vistas se maquetan al tamaño base 1000×640 dentro de un componente `content` al que se
+  aplica `AffineTransform::scale` (75–200 %, relación de aspecto fija). La escala y la pestaña activa se guardan
+  en el nodo `UI` del estado. Todo se dibuja con paths (sin bitmaps) → nítido en HiDPI/Retina.
+- **Motivo:** un único layout que escala de forma exacta y simple; el plugin reabre con el tamaño elegido.
+
+### 2026-11-25 · Capturas de la GUI sin pantalla
+- **Decisión:** test oculto `[.gui]` que renderiza cada vista con `createComponentSnapshot` a PNG
+  (`AETHERFALL_SNAPSHOT_DIR=... AetherfallTests "[.gui]"`); un test normal `[gui]` abre/redimensiona/cierra el
+  editor varias veces.
+- **Motivo:** el contenedor de desarrollo no tiene display; así se puede revisar el diseño en cada sesión.
