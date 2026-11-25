@@ -223,3 +223,10 @@ Formato: fecha · decisión · motivo.
   cambia con la calidad.
 - **Resultado (`[.bench]`, 48 kHz, este contenedor):** cadena típica 5.1 % → 4.2 %; cadena extrema de 8 módulos
   pesados 10.4 % → 7.7 %; core solo 1.9 % (3.3 % con shimmer). Meta de la spec (< 8 %) cumplida.
+
+### 2026-11-25 · Entrega (F11)
+- **Decisión:** workflow `release.yml` disparado por tags `v*`: compila Windows y macOS (Universal) con LTO y CLAP,
+  empaqueta zips (VST3 + CLAP + Standalone; en macOS también AU, firmado ad-hoc) y publica un GitHub Release con
+  notas generadas. CLAP vía `clap-juce-extensions` fijado a un commit (opción `AETHERFALL_BUILD_CLAP`, activada en
+  CI y releases). La creación de tags/releases la decide el usuario.
+- **Motivo:** binarios descargables y reproducibles sin pasos manuales; el formato CLAP se valida en cada push.

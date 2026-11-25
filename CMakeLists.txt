@@ -24,6 +24,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 option(AETHERFALL_BUILD_TESTS        "Build the unit tests (Catch2)"                    ON)
 option(AETHERFALL_COPY_AFTER_BUILD   "Copy plug-ins to the system plug-in folders"      OFF)
 option(AETHERFALL_ENABLE_LTO         "Enable link-time optimisation in Release"         OFF)
+option(AETHERFALL_BUILD_CLAP         "Also build the CLAP format (clap-juce-extensions)" OFF)
 set(AETHERFALL_JUCE_DIR "" CACHE PATH "Local JUCE checkout (empty = libs/JUCE or FetchContent)")
 
 set(AETHERFALL_JUCE_TAG    "8.0.17-security" CACHE STRING "JUCE git tag used by FetchContent")
@@ -118,6 +119,21 @@ target_sources(Aetherfall PRIVATE ${AETHERFALL_SOURCES})
 target_link_libraries(Aetherfall PRIVATE AetherfallShared)
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source" PREFIX "Source" FILES ${AETHERFALL_SOURCES})
+
+# -----------------------------------------------------------------------------
+# Optional CLAP build (clap-juce-extensions wraps the JUCE plug-in as CLAP).
+# -----------------------------------------------------------------------------
+if (AETHERFALL_BUILD_CLAP)
+    FetchContent_Declare(clap-juce-extensions
+        GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
+        GIT_TAG        3837f4a6ed2ab0ba46aba69ae5b7041c7c64ce74
+        GIT_SUBMODULES_RECURSE TRUE)
+    FetchContent_MakeAvailable(clap-juce-extensions)
+
+    clap_juce_extensions_plugin(TARGET Aetherfall
+        CLAP_ID "com.aetherfallaudio.aetherfall"
+        CLAP_FEATURES audio-effect reverb delay stereo)
+endif()
 
 # -----------------------------------------------------------------------------
 # Tests

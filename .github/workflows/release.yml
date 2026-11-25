@@ -1,0 +1,94 @@
+name: release
+
+# Builds the plug-ins and publishes them as a GitHub Release when a tag
+# "v*" is pushed (e.g. git tag v0.1.0 && git push origin v0.1.0).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  ARTEFACTS: build/Aetherfall_artefacts/Release
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2022
+          - name: macOS
+            os: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        shell: bash
+        run: |
+          EXTRA=()
+          if [ "$RUNNER_OS" == "macOS" ]; then EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"); fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DAETHERFALL_BUILD_TESTS=OFF -DAETHERFALL_BUILD_CLAP=ON -DAETHERFALL_ENABLE_LTO=ON "${EXTRA[@]}"
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist/AETHERFALL
+          cp -R "$ARTEFACTS/VST3/AETHERFALL.vst3" dist/AETHERFALL/
+          cp -R "$ARTEFACTS/CLAP/AETHERFALL.clap" dist/AETHERFALL/ || true
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cp -R "$ARTEFACTS/AU/AETHERFALL.component" dist/AETHERFALL/
+            cp -R "$ARTEFACTS/Standalone/AETHERFALL.app" dist/AETHERFALL/
+            for b in dist/AETHERFALL/*; do codesign --force --deep -s - "$b"; done
+            (cd dist && zip -qry "AETHERFALL-${VERSION}-macOS.zip" AETHERFALL)
+          else
+            cp "$ARTEFACTS/Standalone/AETHERFALL.exe" dist/AETHERFALL/ || true
+            (cd dist && 7z a -tzip "AETHERFALL-${VERSION}-Windows.zip" AETHERFALL > /dev/null)
+          fi
+          cp README.md dist/AETHERFALL-README.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: dist/*.zip
+
+  publish:
+    needs: build
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: false

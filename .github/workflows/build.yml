@@ -77,7 +77,7 @@ jobs:
           if [ "$RUNNER_OS" == "macOS" ]; then
             EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64")
           fi
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${EXTRA[@]}"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DAETHERFALL_BUILD_CLAP=ON "${EXTRA[@]}"
 
       - name: Build
         shell: bash
@@ -139,5 +139,6 @@ jobs:
           path: |
             ${{ env.ARTEFACTS }}/VST3
             ${{ env.ARTEFACTS }}/AU
+            ${{ env.ARTEFACTS }}/CLAP
             ${{ env.ARTEFACTS }}/Standalone
           if-no-files-found: warn

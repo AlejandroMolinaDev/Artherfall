@@ -54,6 +54,7 @@ Opciones de CMake útiles:
 | `AETHERFALL_COPY_AFTER_BUILD` | `OFF` | Copia los plugins a las carpetas del sistema tras compilar |
 | `AETHERFALL_ENABLE_LTO` | `OFF` | Link-time optimisation |
 | `AETHERFALL_JUCE_DIR` | vacío | Ruta a una copia local de JUCE |
+| `AETHERFALL_BUILD_CLAP` | `OFF` | Compila también el formato CLAP (clap-juce-extensions) |
 
 Los binarios quedan en `build/Aetherfall_artefacts/Release/{VST3,AU,Standalone}`.
 
@@ -87,11 +88,44 @@ sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/Components/AETHERFAL
 2. AETHERFALL aparece como **efecto**: cárgalo en un slot de un **Mixer Track** (no en el Channel Rack).
 3. Funciona en mono→estéreo y estéreo→estéreo. Las colas siguen sonando con el transporte detenido.
 
-## CI
+## CI y releases
 
 Cada push compila en Windows, macOS (Universal) y Linux, ejecuta los tests unitarios,
 valida el VST3 con **pluginval** (nivel 10) y el AU con **auval**, y sube los binarios
 como artefactos descargables del workflow.
+
+Para publicar una versión: `git tag v0.1.0 && git push origin v0.1.0`. El workflow `release`
+compila Windows y macOS (VST3, AU, CLAP, Standalone; LTO activado) y crea un GitHub Release con
+`AETHERFALL-v0.1.0-Windows.zip` y `AETHERFALL-v0.1.0-macOS.zip`.
+
+## Uso rápido
+
+- **MAIN**: las 4 macros (HAZE, DRIFT, GRIT, BLOOM), Dry/Wet, Width, Ducking y Output; tonalidad/escala global
+  (usada por Drone y Resonator), color del tanque, Freeze y calidad (Eco/Normal/High).
+- **CHAIN**: 8 slots. Elige un módulo en cada slot, arrastra la cabecera de un slot para moverlo. Cada slot tiene
+  On, Mix, Solo (S) y Parallel (P: suena en paralelo con el slot anterior).
+- **CORE**: todos los parámetros del motor ATMOS CORE.
+- **MOD**: LFOs, envolventes, secuenciadores, chaos y macros, matriz de 32 slots. Arrastra un "chip" de fuente
+  (barra inferior) sobre cualquier knob (las pestañas se abren al pasar por encima) o usa clic derecho en el knob →
+  "Modulate with".
+- **OUTPUT**: etapa de entrada, EQ de salida, glue, ducker, clipper/limitador y medidores.
+- Cabecera: presets (◀ ▶ y navegador con búsqueda/favoritos), Undo/Redo (Ctrl/Cmd+Z), A/B (clic derecho: copiar
+  al otro), RAND (aleatorio inteligente por sección), Bypass.
+- Knobs: doble clic = valor por defecto, Ctrl/Cmd + arrastrar = ajuste fino.
+
+## QA manual (antes de una release)
+
+Estas pruebas necesitan un DAW real y no se pueden automatizar en el CI:
+
+- [ ] FL Studio 21/2024 (Windows y macOS): *Find plugins*, cargar en un slot del **Mixer**, duplicar la
+      instancia, guardar y reabrir el proyecto (preset, cadena, matriz y tamaño de ventana se recuperan).
+- [ ] Cambiar sample rate (44.1 → 96 kHz) y tamaño de buffer con el plugin abierto; render offline.
+- [ ] Detener el transporte: las colas siguen sonando. LFOs sincronizados caen en el tiempo correcto.
+- [ ] Automatizar Dry/Wet, una macro y un parámetro de módulo desde FL; "Browse parameters" muestra nombres cortos.
+- [ ] Añadir/quitar el módulo Spectral: FL recompensa la latencia (4096 muestras) y la señal seca sigue alineada.
+- [ ] Bypass del host y botón Bypass sin clicks.
+- [ ] Ableton Live, Logic Pro (AU), Reaper: cargar, automatizar, guardar/abrir.
+- [ ] Escala de la GUI 75 %–200 % en pantallas normales y Retina/HiDPI.
 
 ## Licencias
 

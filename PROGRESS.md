@@ -3,7 +3,8 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F10 – Optimización **terminada** → siguiente: **F11 – QA y entrega**.
+- **Fase:** F11 – QA y entrega **terminada en lo automatizable** → falta la QA manual en DAWs reales (usuario) y
+  crear el primer tag de release cuando el usuario lo decida. Todas las fases F0–F10 están completas.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -151,26 +152,33 @@
   7.7 %, core 1.9–3.3 % de un núcleo a 48 kHz. Benchmark por módulo: `"Per-module CPU benchmark"`.
 - **Tests: 83 casos, todos verdes** (+ los 3 modos de calidad con cadena pesada sin NaN, techo y latencia fija).
 
+- **F11 – QA y entrega (parte automatizable):**
+  - CI verificado en el commit de F10: Linux y Windows en verde (build, 83 tests, pluginval nivel 10). macOS no
+    arranca en esta cuenta (ver bugs).
+  - `.github/workflows/release.yml`: tag `v*` → zips de Windows/macOS (VST3, CLAP, Standalone, AU en Mac) en un
+    GitHub Release.
+  - CLAP opcional (`-DAETHERFALL_BUILD_CLAP=ON`, `clap-juce-extensions` fijado a commit), activado en CI y release;
+    compilado y verificado en el contenedor.
+  - README: tabla de opciones (CLAP), sección de releases, uso rápido de cada vista y checklist de QA manual.
+
 ## A medias
-- Nada a medias.
+- Nada a medias en el código.
 
 ## Siguiente paso exacto
-- **F11 – QA y entrega:**
-  1. Revisar el resultado del CI del último push (Linux/Windows: build + tests + pluginval nivel 10). Arreglar lo
-     que falle en MSVC.
-  2. Releases: workflow `release.yml` que, al crear un tag `v*`, compile Win/Mac (Linux opcional), empaquete
-     `AETHERFALL-<ver>-Windows.zip` (VST3) y `AETHERFALL-<ver>-macOS.zip` (VST3 + AU + Standalone, firmados ad-hoc)
-     y los publique con `softprops/action-gh-release` (o `gh release`).
-  3. CLAP opcional: `clap-juce-extensions` vía FetchContent detrás de `AETHERFALL_BUILD_CLAP=OFF`.
-  4. Checklist manual para el usuario (no automatizable aquí): cargar en FL Studio 21/2024 (Mixer insert), duplicar
-     la instancia, cambiar sample rate/buffer en caliente, render offline, guardar/reabrir proyecto, automatizar
-     parámetros, probar en Ableton/Logic/Reaper. Documentarlo en `README.md` → sección "QA manual".
-  5. Pulido de sonido según escucha real (niveles de módulos y presets).
+1. **Usuario:** pasar la checklist "QA manual" del README en FL Studio (Windows/Mac) y otros DAWs; reportar lo que
+   falle o suene mal (niveles de módulos, presets, colores del tanque).
+2. **Usuario:** si quiere binarios publicados: `git tag v0.1.0 && git push origin v0.1.0` (o pedírselo a Claude).
+3. **Siguiente sesión de Claude** (mejoras sugeridas, por orden de valor):
+   - Afinar sonido según el feedback de escucha (niveles de cada módulo/preset, profundidades de modulación).
+   - Fuente "MIDI CC n" configurable en la matriz.
+   - Renderizado OpenGL opcional del visualizador (`juce_opengl`), con fallback a software.
+   - Arreglar el runner de macOS (minutos/billing) para tener auval en CI.
+   - Más tests de regresión de sonido (huellas de RMS por preset) para detectar cambios no deseados.
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
   runners macOS para repos privados o hay un límite de gasto). Revisar en GitHub → Settings → Billing, o hacer el
-  repo público. Linux/Windows validan igualmente.
+  repo público. Linux/Windows validan igualmente. El workflow de release también necesitará el runner de macOS.
 - pluginval no se puede ejecutar dentro del contenedor de las sesiones de Claude (bloqueado por permisos);
   se valida en CI.
 - Ajustes de sonido pendientes de escucha real (no posible en el contenedor): niveles relativos de los módulos,
