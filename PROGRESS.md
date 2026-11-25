@@ -168,9 +168,10 @@
 ## En curso (sesión 2) — AUDITORÍA COMPLETA pedida por el usuario
 Objetivo: depurar y testear TODAS las funciones (DSP de cada módulo + interfaz de cada vista) en suficientes
 casos para considerarlas funcionando. Pasos (marcar al terminar):
-- [ ] A. `tests/AuditTests.cpp`: cada uno de los ~450 parámetros cambia la salida de audio entre dos valores, con
-      el contexto necesario (módulo en la cadena, modo que lo activa, ruta de modulación para LFO/Env/Seq/Chaos).
-      Corregir los parámetros "muertos" que aparezcan.
+- [x] A. `tests/AuditTests.cpp` (`[audit]`, ~1 min): los 390 parámetros cambian la salida de audio en su
+      contexto (módulo en la cadena, modo que lo activa, ruta de modulación) y sus valores extremos dan salida finita
+      y bajo 0 dBFS con el limitador. Resultado: 0 parámetros muertos, 0 inestables (los 29 marcados en la primera
+      pasada eran errores de contexto del propio test).
 - [ ] B. `tests/GuiInteractionTests.cpp`: en cada vista y cada módulo/página MOD, cada widget mueve su parámetro y
       la automatización del host mueve el widget; slots de la cadena re-enlazados tras reordenar; editores de
       gate/seq/LFO; filas de la matriz; soltar chips de fuente en knobs; botones de cabecera (undo/redo/A-B/

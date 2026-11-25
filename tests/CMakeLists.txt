@@ -32,7 +32,7 @@ target_compile_definitions(AetherfallTests PRIVATE AETHERFALL_TESTS=1)
 # Tests compare floats exactly on purpose (e.g. smoother end values).
 # Source-level options come after the interface warning flags, so they win.
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(${AETHERFALL_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-float-equal")
+    set_source_files_properties(${AETHERFALL_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-float-equal;-Wno-switch-enum")
 endif()
 
 include("${catch2_SOURCE_DIR}/extras/Catch.cmake")
