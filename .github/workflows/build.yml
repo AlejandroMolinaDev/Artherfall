@@ -45,7 +45,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build xvfb \
+          sudo apt-get install -y ninja-build xvfb openbox \
             libasound2-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev \
             libxcursor-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev \
             libgl1-mesa-dev
@@ -83,9 +83,18 @@ jobs:
         shell: bash
         run: cmake --build build --config $BUILD_TYPE --parallel 4
 
-      - name: Unit tests
+      - name: Unit tests + DAW-style host tests (real VST3 binary)
         shell: bash
-        run: ctest --test-dir build -C $BUILD_TYPE --output-on-failure
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            # Virtual display + window manager so the editor test can open real windows.
+            Xvfb :99 -screen 0 1920x1200x24 &
+            sleep 1
+            export DISPLAY=:99
+            openbox &
+            sleep 1
+          fi
+          ctest --test-dir build -C $BUILD_TYPE --output-on-failure
 
       - name: Ad-hoc code signing (macOS)
         if: runner.os == 'macOS'

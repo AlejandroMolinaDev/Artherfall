@@ -230,3 +230,12 @@ Formato: fecha · decisión · motivo.
   notas generadas. CLAP vía `clap-juce-extensions` fijado a un commit (opción `AETHERFALL_BUILD_CLAP`, activada en
   CI y releases). La creación de tags/releases la decide el usuario.
 - **Motivo:** binarios descargables y reproducibles sin pasos manuales; el formato CLAP se valida en cada push.
+
+### 2026-11-25 · Tests de host contra el binario VST3
+- **Decisión:** ejecutable `AetherfallHostTests` (tests/host) que carga el `.vst3` compilado con el hosting VST3 de
+  JUCE y recorre escenarios de DAW (los de la checklist de FL Studio que no requieren FL). Se ejecuta en `ctest`
+  y en el CI; en Linux con Xvfb + openbox para poder abrir ventanas.
+- **Hallazgo:** si un host envía bloques mayores que el `maxSamplesPerBlock` anunciado (prohibido por la spec
+  VST3), el envoltorio VST3 de JUCE desborda su buffer interno (corrupción de heap dentro de JUCE, no en el DSP de
+  AETHERFALL, que sí acepta cualquier tamaño de bloque — probado en los tests unitarios). FL Studio respeta el
+  máximo en VST3; se deja documentado por si algún host no lo hiciera.

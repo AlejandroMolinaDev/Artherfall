@@ -39,3 +39,30 @@ include("${catch2_SOURCE_DIR}/extras/Catch.cmake")
 catch_discover_tests(AetherfallTests
     DISCOVERY_MODE PRE_TEST
     PROPERTIES TIMEOUT 300)
+
+# -----------------------------------------------------------------------------
+# Host-level tests: load the built VST3 through the VST3 API like a DAW.
+# -----------------------------------------------------------------------------
+juce_add_console_app(AetherfallHostTests PRODUCT_NAME "AetherfallHostTests")
+target_sources(AetherfallHostTests PRIVATE host/HostMain.cpp host/HostTests.cpp)
+get_target_property(AETHERFALL_VST3_ARTEFACT Aetherfall_VST3 JUCE_PLUGIN_ARTEFACT_FILE)
+target_compile_definitions(AetherfallHostTests PRIVATE
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    AETHERFALL_VST3_PATH="${AETHERFALL_VST3_ARTEFACT}")
+target_link_libraries(AetherfallHostTests PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_recommended_config_flags
+    Catch2::Catch2)
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(AetherfallHostTests PRIVATE -Wno-float-equal)
+endif()
+add_dependencies(AetherfallHostTests Aetherfall_VST3)
+
+catch_discover_tests(AetherfallHostTests
+    DISCOVERY_MODE PRE_TEST
+    TEST_PREFIX "host: "
+    PROPERTIES TIMEOUT 600)

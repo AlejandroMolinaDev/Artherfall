@@ -113,6 +113,16 @@ compila Windows y macOS (VST3, AU, CLAP, Standalone; LTO activado) y crea un Git
   al otro), RAND (aleatorio inteligente por sección), Bypass.
 - Knobs: doble clic = valor por defecto, Ctrl/Cmd + arrastrar = ajuste fino.
 
+## Tests de host (automáticos)
+
+`AetherfallHostTests` carga el **binario VST3 compilado** a través de la API VST3, como lo hace un DAW, y
+ejecuta 13 escenarios: escaneo, instanciar y procesar, duplicar la instancia (copia idéntica), cambios de
+sample rate / buffer en caliente (22.05–192 kHz, bloques de 1 a 2048), render offline, transporte parado (las
+colas siguen), automatización aleatoria de parámetros, bypass del host sin clicks, recarga de proyecto con el
+módulo Spectral (latencia de 4096 muestras reportada y señal seca alineada), pista mono, 8 instancias a la vez,
+cargar/descargar el plugin y abrir/redimensionar/cerrar la ventana. Se ejecutan con `ctest` y en el CI (en
+Windows contra el `.vst3` de Windows).
+
 ## QA manual (antes de una release)
 
 Estas pruebas necesitan un DAW real y no se pueden automatizar en el CI:

@@ -161,6 +161,10 @@
     compilado y verificado en el contenedor.
   - README: tabla de opciones (CLAP), sección de releases, uso rápido de cada vista y checklist de QA manual.
 
+- **QA automática de host (sesión 2):** `tests/host/HostTests.cpp` → 13 escenarios tipo DAW contra el `.vst3`
+  real, todos en verde (incluida la ventana abierta en X11 con Xvfb + openbox). CI del commit con CLAP
+  (`f6e1905`): Linux y Windows en verde. Captura de la app Standalone real revisada.
+
 ## A medias
 - Nada a medias en el código.
 
@@ -176,9 +180,8 @@
    - Más tests de regresión de sonido (huellas de RMS por preset) para detectar cambios no deseados.
 
 ## Bugs conocidos / pendientes
-- **Verificar al empezar la próxima sesión** que el CI del commit `f6e1905` (primer build con CLAP activado,
-  `-DAETHERFALL_BUILD_CLAP=ON`) pasó en Linux y Windows. Si CLAP falla en MSVC, desactivarlo en `build.yml` /
-  `release.yml` o arreglarlo (el resto del código ya estaba verde en `f1e9f4d`).
+- Envoltorio VST3 de JUCE: un host que envíe bloques mayores que el máximo anunciado (fuera de la spec) provoca
+  corrupción de memoria dentro de JUCE (ver DECISIONS). FL Studio respeta el máximo.
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
   runners macOS para repos privados o hay un límite de gasto). Revisar en GitHub → Settings → Billing, o hacer el
   repo público. Linux/Windows validan igualmente. El workflow de release también necesitará el runner de macOS.
