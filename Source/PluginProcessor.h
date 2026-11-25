@@ -5,6 +5,8 @@
 #include "Parameters/ParamIDs.h"
 #include "Parameters/ParamLayout.h"
 #include "DSP/Chain/ModContext.h"
+#include "DSP/Core/AtmosCore.h"
+#include "DSP/Utils/Smoothers.h"
 
 namespace aetherfall
 {
@@ -65,6 +67,16 @@ private:
 
     /** Effective (modulated) parameter values for the current chunk. */
     std::array<float, (size_t) numParams> effective {};
+
+    // --- DSP stages -----------------------------------------------------------
+    AtmosCore core;
+
+    // Dry copy of the current chunk (for dry/wet and bypass).
+    std::array<std::array<float, controlBlockSize>, 2> dryChunk {};
+
+    // Provisional output stage (dry/wet, gain, bypass) until the full Output
+    // Stage of phase F6 replaces it.
+    dsp::LinearSmoother<float> outDryGain, outWetGain, outGain, bypassMix;
 
     double currentSampleRate = 48000.0;
     int maxBlockSize = 512;

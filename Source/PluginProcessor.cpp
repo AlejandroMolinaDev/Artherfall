@@ -22,8 +22,10 @@ const juce::String AetherfallProcessor::getName() const { return product::name; 
 
 double AetherfallProcessor::getTailLengthSeconds() const
 {
-    // Updated with the real ATMOS CORE decay once it exists (F2).
-    return 0.0;
+    return AtmosCore::estimateTailSeconds (params.load (PID::CoreDecay),
+                                           (int) std::lround (params.load (PID::CoreColor)),
+                                           params.load (PID::CorePreDelay),
+                                           params.load (PID::CoreFreeze) >= 0.5f);
 }
 
 //==============================================================================
@@ -34,11 +36,28 @@ void AetherfallProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     params.refresh();
     std::copy (params.data(), params.data() + numParams, effective.begin());
+
+    // All stages work on control-rate chunks, so their max block is fixed.
+    core.prepare (currentSampleRate, controlBlockSize, 2);
+
+    for (auto* sm : { &outDryGain, &outWetGain, &outGain, &bypassMix })
+        sm->prepare (currentSampleRate, 0.03);
+
+    reset();
 }
 
 void AetherfallProcessor::releaseResources() {}
 
-void AetherfallProcessor::reset() {}
+void AetherfallProcessor::reset()
+{
+    core.reset();
+
+    const float mix = params.load (PID::OutMix);
+    outDryGain.setCurrentAndTarget (std::cos (mix * juce::MathConstants<float>::halfPi));
+    outWetGain.setCurrentAndTarget (std::sin (mix * juce::MathConstants<float>::halfPi));
+    outGain.setCurrentAndTarget (juce::Decibels::decibelsToGain (params.load (PID::OutGain)));
+    bypassMix.setCurrentAndTarget (params.load (PID::Bypass) >= 0.5f ? 1.0f : 0.0f);
+}
 
 bool AetherfallProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
@@ -110,8 +129,6 @@ void AetherfallProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start, int length,
                                         const TransportState& blockTransport)
 {
-    juce::ignoreUnused (io);
-
     // 1) Control rate: snapshot host parameter values.
     params.refresh();
 
@@ -127,8 +144,38 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     if (ctx.transport.hasPpq)
         ctx.transport.ppqPosition += (double) start / currentSampleRate * (ctx.transport.bpm / 60.0);
 
-    // 4) DSP stages (F2+): input stage -> chain -> ATMOS CORE -> output stage.
-    //    Currently a clean passthrough.
+    // 4) Keep the dry signal for the dry/wet and bypass crossfades.
+    for (int ch = 0; ch < 2; ++ch)
+        std::copy_n (io.getReadPointer (ch, start), length, dryChunk[(size_t) ch].data());
+
+    // A view of the chunk (2 channels: no heap allocation).
+    juce::AudioBuffer<float> chunk (io.getArrayOfWritePointers(), 2, start, length);
+
+    // 5) DSP stages: [input stage F6] -> [chain F3] -> ATMOS CORE -> output.
+    core.process (chunk, ctx);
+
+    // 6) Provisional output stage: dry/wet, output gain, bypass.
+    const float mix = ctx.get (PID::OutMix);
+    outDryGain.setTarget (std::cos (mix * juce::MathConstants<float>::halfPi));
+    outWetGain.setTarget (std::sin (mix * juce::MathConstants<float>::halfPi));
+    outGain.setTarget (juce::Decibels::decibelsToGain (ctx.get (PID::OutGain)));
+    bypassMix.setTarget (ctx.getBool (PID::Bypass) ? 1.0f : 0.0f);
+
+    float* L = chunk.getWritePointer (0);
+    float* R = chunk.getWritePointer (1);
+    const float* dL = dryChunk[0].data();
+    const float* dR = dryChunk[1].data();
+
+    for (int i = 0; i < length; ++i)
+    {
+        const float dg = outDryGain.next(), wg = outWetGain.next();
+        const float og = outGain.next(), bp = bypassMix.next();
+
+        const float l = (dg * dL[i] + wg * L[i]) * og;
+        const float r = (dg * dR[i] + wg * R[i]) * og;
+        L[i] = l + bp * (dL[i] - l);
+        R[i] = r + bp * (dR[i] - r);
+    }
 }
 
 //==============================================================================
