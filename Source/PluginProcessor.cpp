@@ -21,11 +21,172 @@ AetherfallProcessor::AetherfallProcessor()
     modstate::ensureNodes (apvts.state);
     apvts.state.addListener (this);
     pushAllStateToAudio();
+
+    for (auto* p : getParameters())
+        p->addListener (this);
 }
 
 AetherfallProcessor::~AetherfallProcessor()
 {
+    for (auto* p : getParameters())
+        p->removeListener (this);
     apvts.state.removeListener (this);
+}
+
+//==============================================================================
+void AetherfallProcessor::checkpoint()
+{
+    if (restoringState || ! juce::MessageManager::existsAndIsCurrentThread())
+        return;
+    history.checkpoint (apvts.copyState());
+}
+
+void AetherfallProcessor::parameterGestureChanged (int, bool starting)
+{
+    if (! juce::MessageManager::existsAndIsCurrentThread())
+        return;
+    if (starting)
+    {
+        if (gestureDepth++ == 0)
+            checkpoint();
+    }
+    else
+    {
+        gestureDepth = std::max (0, gestureDepth - 1);
+    }
+}
+
+void AetherfallProcessor::restoreState (const juce::ValueTree& state)
+{
+    if (! state.isValid())
+        return;
+    const juce::ScopedValueSetter<bool> svs (restoringState, true);
+    apvts.replaceState (state.createCopy());
+    getChainNode();
+    getGateNode();
+    modstate::ensureNodes (apvts.state);
+    pushAllStateToAudio();
+}
+
+bool AetherfallProcessor::undo()
+{
+    const auto s = history.undo (apvts.copyState());
+    restoreState (s);
+    return s.isValid();
+}
+
+bool AetherfallProcessor::redo()
+{
+    const auto s = history.redo (apvts.copyState());
+    restoreState (s);
+    return s.isValid();
+}
+
+void AetherfallProcessor::toggleAB()
+{
+    checkpoint();
+    abStates[(size_t) abIndex] = apvts.copyState();
+    abIndex = 1 - abIndex;
+    if (abStates[(size_t) abIndex].isValid())
+        restoreState (abStates[(size_t) abIndex]);
+    else
+        abStates[(size_t) abIndex] = apvts.copyState();   // first switch: B starts as a copy of A
+}
+
+void AetherfallProcessor::copyCurrentToOtherAB()
+{
+    abStates[(size_t) (1 - abIndex)] = apvts.copyState();
+}
+
+int AetherfallProcessor::assignModulation (ModSource source, PID dest, float amount)
+{
+    if (source == ModSource::None || ! info (dest).isModulatable())
+        return -1;
+
+    const auto routing = getModRouting();
+    for (int s = 0; s < numModSlots; ++s)
+    {
+        if (routing.slots[(size_t) s].source != ModSource::None)
+            continue;
+
+        checkpoint();
+        {
+            const juce::ScopedValueSetter<bool> svs (restoringState, true);   // single undo step
+            setModSlot (s, { source, (std::int16_t) dest, ModCurve::Linear, ModSource::None });
+            if (auto* p = apvts.getParameter (juce::String (std::string (info (modAmountParam (s)).id))))
+                p->setValueNotifyingHost (p->convertTo0to1 (amount));
+        }
+        return s;
+    }
+    return -1;
+}
+
+void AetherfallProcessor::removeModulation (PID dest)
+{
+    const auto routing = getModRouting();
+    bool first = true;
+    for (int s = 0; s < numModSlots; ++s)
+        if (routing.slots[(size_t) s].dest == (std::int16_t) dest)
+        {
+            if (first) { checkpoint(); first = false; }
+            const juce::ScopedValueSetter<bool> svs (restoringState, true);
+            setModSlot (s, {});
+        }
+}
+
+void AetherfallProcessor::randomize (RandomSection section, float intensity, std::uint32_t seed)
+{
+    intensity = juce::jlimit (0.0f, 1.0f, intensity);
+    juce::Random rng ((juce::int64) seed);
+    std::vector<PID> targets;
+
+    auto addRange = [&targets] (PID first, PID last)
+    {
+        for (int p = (int) first; p <= (int) last; ++p)
+            targets.push_back ((PID) p);
+    };
+
+    switch (section)
+    {
+        case RandomSection::Core:
+            addRange (PID::CoreSize, PID::CoreWidth);
+            break;
+        case RandomSection::Chain:
+            for (auto t : getChainOrder())
+                if (t != ModuleType::None)
+                    addRange (moduleInfo (t).firstParam, moduleInfo (t).lastParam);
+            break;
+        case RandomSection::Modulation:
+            addRange (PID::Lfo1Shape, PID::Chaos2Smooth);
+            break;
+        case RandomSection::Output:
+            addRange (PID::OutTilt, PID::OutDuckRelease);
+            break;
+    }
+
+    // Never randomise things that could surprise badly (freeze/hold switches,
+    // safety stages, levels).
+    const PID excluded[] = { PID::CoreFreeze, PID::GranFreeze, PID::SpecFreeze, PID::DroneHold,
+                             PID::OutGlueOn, PID::OutGlueMakeup };
+
+    checkpoint();
+    const juce::ScopedValueSetter<bool> svs (restoringState, true);
+    for (auto pid : targets)
+    {
+        if (std::find (std::begin (excluded), std::end (excluded), pid) != std::end (excluded))
+            continue;
+        auto* p = apvts.getParameter (juce::String (std::string (info (pid).id)));
+        if (p == nullptr)
+            continue;
+
+        const float current = p->getValue();
+        float next = current;
+        if (info (pid).kind == Kind::Float)
+            next = current + intensity * (rng.nextFloat() - current);
+        else if (rng.nextFloat() < intensity * 0.5f)
+            next = rng.nextFloat();
+        p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, next));
+    }
 }
 
 //==============================================================================
@@ -55,6 +216,7 @@ juce::ValueTree AetherfallProcessor::getGateNode()
 
 void AetherfallProcessor::setGatePattern (std::uint32_t pattern)
 {
+    checkpoint();
     getGateNode().setProperty (gatePatternProp, (int) (pattern & 0xFFFFu), nullptr);
     pushGatePatternToAudio();
 }
@@ -81,24 +243,28 @@ void AetherfallProcessor::pushModRoutingToAudio()
 
 void AetherfallProcessor::setModSlot (int slot, const ModSlot& s, juce::UndoManager* um)
 {
+    checkpoint();
     modstate::writeSlot (apvts.state, slot, s, um);
     pushModRoutingToAudio();
 }
 
 void AetherfallProcessor::setMacroTarget (int macro, int index, const MacroTarget& t, juce::UndoManager* um)
 {
+    checkpoint();
     modstate::writeMacroTarget (apvts.state, macro, index, t, um);
     pushModRoutingToAudio();
 }
 
 void AetherfallProcessor::setSeqSteps (int seq, const std::array<float, (size_t) seqMaxSteps>& steps, juce::UndoManager* um)
 {
+    checkpoint();
     modstate::writeSeqSteps (apvts.state, seq, steps, um);
     pushModRoutingToAudio();
 }
 
 void AetherfallProcessor::setLfoShape (int lfo, const std::array<float, (size_t) lfoCustomPoints>& points, juce::UndoManager* um)
 {
+    checkpoint();
     modstate::writeLfoShape (apvts.state, lfo, points, um);
     pushModRoutingToAudio();
 }
@@ -112,6 +278,7 @@ void AetherfallProcessor::pushAllStateToAudio()
 
 void AetherfallProcessor::setChainOrder (const chain::Order& order)
 {
+    checkpoint();
     const auto text = chain::toString (chain::sanitize (order));
     getChainNode().setProperty (chainOrderProp, juce::String (text), nullptr);
     pushChainOrderToAudio();

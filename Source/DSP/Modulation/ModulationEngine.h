@@ -62,6 +62,10 @@ public:
 
     const AnalysisFrame& getAnalysis() const noexcept { return analyzer.getFrame(); }
 
+    /** Current modulation offset of a parameter in its normalised range
+        (0 = not modulated). For the GUI modulation rings, any thread. */
+    float getModOffset (PID p) const noexcept { return guiOffsets[idx (p)].load (std::memory_order_relaxed); }
+
     /** Last value of each source (for the GUI, any thread). */
     float getSourceValue (ModSource s) const noexcept
     {
@@ -85,6 +89,7 @@ private:
     std::array<std::atomic<float>, (size_t) ModSource::Count> sourceValues {};
 
     std::array<float, (size_t) numParams> offsets {};
+    std::array<std::atomic<float>, (size_t) numParams> guiOffsets {};
     std::array<std::int16_t, (size_t) (numModSlots + numMacros * macroTargetsPerMacro)> touched {};
     int numTouched = 0;
 

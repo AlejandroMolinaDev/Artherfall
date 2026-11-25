@@ -152,7 +152,10 @@ void ModulationEngine::process (const float* base, float* effective, const Chunk
 
     // --- Accumulate offsets (normalised domain).
     for (int i = 0; i < numTouched; ++i)
+    {
         offsets[(size_t) touched[(size_t) i]] = 0.0f;
+        guiOffsets[(size_t) touched[(size_t) i]].store (0.0f, std::memory_order_relaxed);
+    }
     numTouched = 0;
 
     auto addOffset = [this] (int dest, float amount)
@@ -213,8 +216,10 @@ void ModulationEngine::process (const float* base, float* effective, const Chunk
     {
         const auto d = (size_t) touched[(size_t) i];
         const auto& range = ranges[d];
-        const float norm = dsp::clamp (range.convertTo0to1 (base[d]) + offsets[d], 0.0f, 1.0f);
+        const float baseNorm = range.convertTo0to1 (base[d]);
+        const float norm = dsp::clamp (baseNorm + offsets[d], 0.0f, 1.0f);
         effective[d] = range.convertFrom0to1 (norm);
+        guiOffsets[d].store (norm - baseNorm, std::memory_order_relaxed);
     }
 }
 

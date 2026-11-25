@@ -13,6 +13,7 @@
 #include "DSP/Chain/ChainOrder.h"
 #include "DSP/Modulation/ModulationEngine.h"
 #include "Parameters/ModRoutingState.h"
+#include "Presets/StateHistory.h"
 #include "DSP/Utils/Smoothers.h"
 #include "DSP/Utils/DelayLine.h"
 
@@ -20,7 +21,8 @@ namespace aetherfall
 {
 
 class AetherfallProcessor final : public juce::AudioProcessor,
-                                  private juce::ValueTree::Listener
+                                  private juce::ValueTree::Listener,
+                                  private juce::AudioProcessorParameter::Listener
 {
 public:
     AetherfallProcessor();
@@ -90,6 +92,33 @@ public:
     void setSeqSteps (int seq, const std::array<float, (size_t) seqMaxSteps>& steps, juce::UndoManager* um = nullptr);
     void setLfoShape (int lfo, const std::array<float, (size_t) lfoCustomPoints>& points, juce::UndoManager* um = nullptr);
 
+    /** Modulation offset currently applied to a parameter (normalised, GUI rings). */
+    float getModOffset (PID p) const noexcept { return modEngine.getModOffset (p); }
+
+    /** Assigns `source` to `dest` in the first free matrix slot (amount 50 %).
+        Returns the slot index or -1 if the matrix is full / dest not modulatable. */
+    int assignModulation (ModSource source, PID dest, float amount = 0.5f);
+
+    /** Clears every matrix slot that targets `dest`. */
+    void removeModulation (PID dest);
+
+    //==========================================================================
+    // Undo / redo (message thread). Every UI gesture and state edit is undoable.
+    void checkpoint();
+    bool undo();
+    bool redo();
+    bool canUndo() const noexcept { return history.canUndo(); }
+    bool canRedo() const noexcept { return history.canRedo(); }
+
+    // A/B comparison of two complete states.
+    void toggleAB();
+    void copyCurrentToOtherAB();
+    int getABIndex() const noexcept { return abIndex; }
+
+    // Smart randomisation of one section with an intensity 0..1.
+    enum class RandomSection { Core, Chain, Modulation, Output };
+    void randomize (RandomSection section, float intensity, std::uint32_t seed);
+
     /** Level meters and gain reductions (GUI). */
     const Meters& getMeters() const noexcept { return meters; }
 
@@ -110,6 +139,11 @@ private:
     void pushModRoutingToAudio();
     void pushAllStateToAudio();
     void handleMidi (const juce::MidiBuffer&);
+    void restoreState (const juce::ValueTree&);
+
+    // AudioProcessorParameter::Listener — gestures create undo checkpoints.
+    void parameterValueChanged (int, float) override {}
+    void parameterGestureChanged (int, bool gestureIsStarting) override;
 
     // ValueTree::Listener — keeps the audio-thread mirror in sync with the
     // state (GUI edits, undo/redo, preset/project loading).
@@ -124,6 +158,13 @@ private:
 
     /** Effective (modulated) parameter values for the current chunk. */
     std::array<float, (size_t) numParams> effective {};
+
+    // --- Undo / A-B (message thread) -------------------------------------------
+    StateHistory history;
+    std::array<juce::ValueTree, 2> abStates;
+    int abIndex = 0;
+    int gestureDepth = 0;
+    bool restoringState = false;
 
     // --- Modulation -----------------------------------------------------------
     ModulationEngine modEngine;
