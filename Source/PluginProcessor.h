@@ -6,12 +6,15 @@
 #include "Parameters/ParamLayout.h"
 #include "DSP/Chain/ModContext.h"
 #include "DSP/Core/AtmosCore.h"
+#include "DSP/Chain/FXChain.h"
+#include "DSP/Chain/ChainOrder.h"
 #include "DSP/Utils/Smoothers.h"
 
 namespace aetherfall
 {
 
-class AetherfallProcessor final : public juce::AudioProcessor
+class AetherfallProcessor final : public juce::AudioProcessor,
+                                  private juce::ValueTree::Listener
 {
 public:
     AetherfallProcessor();
@@ -53,12 +56,33 @@ public:
 
     juce::AudioProcessorValueTreeState& getValueTreeState() noexcept { return apvts; }
 
+    //==========================================================================
+    // FX chain order (message thread). Stored in the CHAIN node of the state
+    // tree, so it is saved with the project / presets and is undoable.
+    void setChainOrder (const chain::Order& order);
+    chain::Order getChainOrder() const;
+
+    /** Order the audio thread is actually running (for tests / GUI feedback). */
+    chain::Order getActiveChainOrder() const noexcept { return chain.getActiveOrder(); }
+
+    static inline const juce::Identifier chainNodeId { "CHAIN" };
+    static inline const juce::Identifier chainOrderProp { "order" };
+
     /** Samples per control-rate chunk: parameters/modulation are evaluated once
         per chunk, so behaviour does not depend on the host buffer size. */
     static constexpr int controlBlockSize = 64;
 
 private:
     TransportState readTransport() const;
+
+    juce::ValueTree getChainNode();
+    void pushChainOrderToAudio();
+
+    // ValueTree::Listener — keeps the audio-thread mirror in sync with the
+    // state (GUI edits, undo/redo, preset/project loading).
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
+    void valueTreeRedirected (juce::ValueTree&) override;
     void processChunk (juce::AudioBuffer<float>& io, int start, int length, const TransportState&);
 
     juce::AudioProcessorValueTreeState apvts;
@@ -69,7 +93,9 @@ private:
     std::array<float, (size_t) numParams> effective {};
 
     // --- DSP stages -----------------------------------------------------------
+    FXChain chain;
     AtmosCore core;
+    std::atomic<std::uint64_t> chainOrderPacked { 0 };
 
     // Dry copy of the current chunk (for dry/wet and bypass).
     std::array<std::array<float, controlBlockSize>, 2> dryChunk {};

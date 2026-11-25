@@ -14,15 +14,72 @@ AetherfallProcessor::AetherfallProcessor()
 {
     bypassParam = apvts.getParameter (juce::String (std::string (info (PID::Bypass).id)));
     jassert (bypassParam != nullptr);
+
+    getChainNode();   // make sure the node exists in a fresh state
+    apvts.state.addListener (this);
+    pushChainOrderToAudio();
 }
 
-AetherfallProcessor::~AetherfallProcessor() = default;
+AetherfallProcessor::~AetherfallProcessor()
+{
+    apvts.state.removeListener (this);
+}
+
+//==============================================================================
+juce::ValueTree AetherfallProcessor::getChainNode()
+{
+    auto node = apvts.state.getChildWithName (chainNodeId);
+    if (! node.isValid())
+    {
+        node = juce::ValueTree (chainNodeId);
+        node.setProperty (chainOrderProp, juce::String(), nullptr);
+        apvts.state.appendChild (node, nullptr);
+    }
+    return node;
+}
+
+void AetherfallProcessor::setChainOrder (const chain::Order& order)
+{
+    const auto text = chain::toString (chain::sanitize (order));
+    getChainNode().setProperty (chainOrderProp, juce::String (text), nullptr);
+    pushChainOrderToAudio();
+}
+
+chain::Order AetherfallProcessor::getChainOrder() const
+{
+    const auto node = apvts.state.getChildWithName (chainNodeId);
+    if (! node.isValid())
+        return chain::emptyOrder();
+    return chain::fromString (node.getProperty (chainOrderProp).toString().toStdString());
+}
+
+void AetherfallProcessor::pushChainOrderToAudio()
+{
+    chainOrderPacked.store (chain::pack (getChainOrder()), std::memory_order_release);
+}
+
+void AetherfallProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& prop)
+{
+    if (tree.hasType (chainNodeId) && prop == chainOrderProp)
+        pushChainOrderToAudio();
+}
+
+void AetherfallProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
+{
+    if (child.hasType (chainNodeId))
+        pushChainOrderToAudio();
+}
+
+void AetherfallProcessor::valueTreeRedirected (juce::ValueTree&)
+{
+    pushChainOrderToAudio();
+}
 
 const juce::String AetherfallProcessor::getName() const { return product::name; }
 
 double AetherfallProcessor::getTailLengthSeconds() const
 {
-    return AtmosCore::estimateTailSeconds (params.load (PID::CoreDecay),
+    return chain.getTailSeconds() + AtmosCore::estimateTailSeconds (params.load (PID::CoreDecay),
                                            (int) std::lround (params.load (PID::CoreColor)),
                                            params.load (PID::CorePreDelay),
                                            params.load (PID::CoreFreeze) >= 0.5f);
@@ -38,6 +95,7 @@ void AetherfallProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     std::copy (params.data(), params.data() + numParams, effective.begin());
 
     // All stages work on control-rate chunks, so their max block is fixed.
+    chain.prepare (currentSampleRate, controlBlockSize);
     core.prepare (currentSampleRate, controlBlockSize, 2);
 
     for (auto* sm : { &outDryGain, &outWetGain, &outGain, &bypassMix })
@@ -50,6 +108,8 @@ void AetherfallProcessor::releaseResources() {}
 
 void AetherfallProcessor::reset()
 {
+    chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
+    chain.reset();
     core.reset();
 
     const float mix = params.load (PID::OutMix);
@@ -151,7 +211,9 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     // A view of the chunk (2 channels: no heap allocation).
     juce::AudioBuffer<float> chunk (io.getArrayOfWritePointers(), 2, start, length);
 
-    // 5) DSP stages: [input stage F6] -> [chain F3] -> ATMOS CORE -> output.
+    // 5) DSP stages: [input stage F6] -> FX chain -> ATMOS CORE -> output.
+    chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
+    chain.process (chunk, ctx);
     core.process (chunk, ctx);
 
     // 6) Provisional output stage: dry/wet, output gain, bypass.
@@ -198,7 +260,11 @@ void AetherfallProcessor::setStateInformation (const void* data, int sizeInBytes
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            getChainNode();
+            pushChainOrderToAudio();
+        }
 }
 
 } // namespace aetherfall

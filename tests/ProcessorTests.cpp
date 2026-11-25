@@ -200,3 +200,34 @@ TEST_CASE ("Bus layouts: mono->stereo and stereo->stereo only", "[processor]")
     l.outputBuses.getReference (0) = juce::AudioChannelSet::mono();
     REQUIRE_FALSE (p.checkBusesLayoutSupported (l));
 }
+
+TEST_CASE ("Processor CPU benchmark with a typical chain", "[.bench]")
+{
+    AetherfallProcessor p;
+    p.setPlayConfigDetails (2, 2, 48000.0, 256);
+    p.prepareToPlay (48000.0, 256);
+
+    auto order = aetherfall::chain::emptyOrder();
+    order[0] = aetherfall::ModuleType::Granular;
+    order[1] = aetherfall::ModuleType::TapeDelay;
+    order[2] = aetherfall::ModuleType::Filter;
+    order[3] = aetherfall::ModuleType::Saturator;
+    order[4] = aetherfall::ModuleType::Stereo;
+    p.setChainOrder (order);
+    setParam (p, PID::CoreShimmer, 0.4f);
+
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    aetherfall::dsp::Random32 rng (1);
+    const int blocks = 48000 * 20 / 256;
+    const auto t0 = juce::Time::getHighResolutionTicks();
+    for (int b = 0; b < blocks; ++b)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 256; ++i)
+                buffer.setSample (ch, i, 0.2f * rng.nextBipolar());
+        p.processBlock (buffer, midi);
+    }
+    const double secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
+    WARN ("typical chain + core: " << 100.0 * secs / (blocks * 256 / 48000.0) << " % of one core");
+}

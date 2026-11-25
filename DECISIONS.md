@@ -91,3 +91,23 @@ Formato: fecha · decisión · motivo.
 - **Decisión:** `core_mix` y `out_mix` usan cos/sin (equal-power).
 - **Motivo:** la señal wet de una reverb está decorrelada de la seca; equal-power mantiene la sonoridad estable
   al mover el knob.
+
+### 2026-11-25 · FXChain: instancias fijas, solo/parallel y reordenado por fundido
+- **Decisión:** `FXChain` crea en `prepare()` una instancia de cada uno de los 18 módulos; el orden activo es un
+  `uint64` (1 byte por slot) leído con un único `atomic::load` por trozo. Un módulo que pasa de apagado a activo
+  (o entra en la cadena) se `reset()`ea antes de procesar. Solo: si algún módulo activo tiene solo, el resto pasa
+  la señal. Parallel: un slot paralelo recibe la entrada del slot serie anterior; el grupo se promedia con pesos
+  (cabeza = 1, ramas paralelas = su ganancia on/off suavizada). Reordenar: la salida de la cadena se funde hacia
+  su entrada (10 ms), se aplica el nuevo orden y se funde de vuelta.
+- **Motivo:** cero allocations en el audio thread, estado de los módulos conservado al moverlos, transiciones sin
+  clicks verificadas por test (`[chain]`).
+
+### 2026-11-25 · Módulos aún no implementados = stub pass-through
+- **Decisión:** `createModule()` devuelve un `PassthroughModule` para los módulos de F4; `isModuleImplemented()`
+  lo indica (el editor provisional los marca con "(F4)").
+- **Motivo:** el proyecto compila y la cadena funciona en todo momento mientras se completan los módulos.
+
+### 2026-11-25 · Granular Cloud con buffer mono
+- **Decisión:** el buffer circular (~8 s, potencia de 2) guarda la suma mono de la entrada (+ feedback); cada grano
+  se panoramiza dentro de "Width". Normalización de nivel por `1/sqrt(densidad·tamaño)`.
+- **Motivo:** mitad de memoria y lecturas, y las nubes ganan anchura por el paneo aleatorio por grano.
