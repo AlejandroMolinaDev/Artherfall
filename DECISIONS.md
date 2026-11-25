@@ -132,3 +132,24 @@ Formato: fecha · decisión · motivo.
 - **Decisión:** YIN sobre la señal decimada a ~12 kHz, ventana 1024, hop 256, rango ~45 Hz–1.5 kHz, umbral 0.15.
   El Drone usa su propia instancia sobre la entrada de su slot; el Input Analyzer de F5 reutilizará la clase.
 - **Motivo:** robusto para voces/bajos/pads, coste acotado y sin allocations en el audio thread.
+
+### 2026-11-25 · Motor de modulación (F5)
+- **Decisión:** `ModulationEngine` evalúa todas las fuentes una vez por trozo de control y calcula los valores
+  efectivos en el dominio normalizado (0..1) de cada parámetro: `norm(host) + Σ macro·amount + Σ matriz`, con
+  saturación a [0,1]. La rutina (fuentes/destinos/curvas/vía de la matriz, mapas de macros, pasos de los
+  secuenciadores, formas custom de LFO) vive en nodos del estado (`MODMATRIX`, `MACROS`, `SEQ`, `LFOSHAPES`, por
+  IDs string) y llega al audio thread por un `TripleBuffer` (sin locks; el lado escritor usa un SpinLock propio).
+  Los ajustes de los moduladores se leen de los valores efectivos del trozo anterior (modulación de moduladores con
+  1 trozo de retardo). `glob_moddepth` (destino de DRIFT) escala LFO/Env/Seq/Chaos/Analyzer; macros y MIDI no.
+- **Motivo:** cantidades homogéneas para cualquier destino ("la misma fracción del recorrido del knob"), nada de
+  allocations en el audio thread y estado completo guardado con el proyecto.
+
+### 2026-11-25 · Macros como tabla propia (4 × 8 destinos), aparte de la matriz
+- **Decisión:** las macros tienen su propio mapa de destinos (los valores por defecto siguen la spec: HAZE, DRIFT,
+  GRIT, BLOOM) y además están disponibles como fuentes de la matriz.
+- **Motivo:** los 32 slots de la matriz quedan libres para el usuario; los presets pueden redefinir los mapas.
+
+### 2026-11-25 · MIDI a nivel de bloque
+- **Decisión:** nota, velocity, mod wheel (CC1) y pitch bend se leen una vez por bloque del host; el note-on
+  dispara el retrigger "MIDI Note" de los LFOs.
+- **Motivo:** para fuentes de modulación y retrigger la precisión de bloque es suficiente y mucho más simple.

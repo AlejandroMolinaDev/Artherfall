@@ -8,6 +8,8 @@
 #include "DSP/Core/AtmosCore.h"
 #include "DSP/Chain/FXChain.h"
 #include "DSP/Chain/ChainOrder.h"
+#include "DSP/Modulation/ModulationEngine.h"
+#include "Parameters/ModRoutingState.h"
 #include "DSP/Utils/Smoothers.h"
 #include "DSP/Utils/DelayLine.h"
 
@@ -76,6 +78,18 @@ public:
     static inline const juce::Identifier gateNodeId { "GATE" };
     static inline const juce::Identifier gatePatternProp { "pattern" };
 
+    //==========================================================================
+    // Modulation routing (matrix sources/destinations, macro maps, sequencer
+    // steps, custom LFO shapes). Message thread; stored in the state tree.
+    ModRouting getModRouting() const { return modstate::read (apvts.state); }
+    void setModSlot (int slot, const ModSlot& s, juce::UndoManager* um = nullptr);
+    void setMacroTarget (int macro, int index, const MacroTarget& t, juce::UndoManager* um = nullptr);
+    void setSeqSteps (int seq, const std::array<float, (size_t) seqMaxSteps>& steps, juce::UndoManager* um = nullptr);
+    void setLfoShape (int lfo, const std::array<float, (size_t) lfoCustomPoints>& points, juce::UndoManager* um = nullptr);
+
+    /** Live modulation source values (GUI meters / rings). */
+    float getModSourceValue (ModSource s) const noexcept { return modEngine.getSourceValue (s); }
+
     /** Samples per control-rate chunk: parameters/modulation are evaluated once
         per chunk, so behaviour does not depend on the host buffer size. */
     static constexpr int controlBlockSize = 64;
@@ -87,7 +101,9 @@ private:
     juce::ValueTree getGateNode();
     void pushChainOrderToAudio();
     void pushGatePatternToAudio();
+    void pushModRoutingToAudio();
     void pushAllStateToAudio();
+    void handleMidi (const juce::MidiBuffer&);
 
     // ValueTree::Listener — keeps the audio-thread mirror in sync with the
     // state (GUI edits, undo/redo, preset/project loading).
@@ -102,6 +118,12 @@ private:
 
     /** Effective (modulated) parameter values for the current chunk. */
     std::array<float, (size_t) numParams> effective {};
+
+    // --- Modulation -----------------------------------------------------------
+    ModulationEngine modEngine;
+    juce::SpinLock routingWriteLock;   // writer side only (never taken on the audio thread)
+    std::array<std::array<float, controlBlockSize>, 2> lastWet {};
+    int lastWetLength = 0;
 
     // --- DSP stages -----------------------------------------------------------
     FXChain chain;

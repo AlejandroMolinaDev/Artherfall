@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F4 – Módulos restantes **terminada** (18/18 módulos) → siguiente: **F5 – Modulación**.
+- **Fase:** F5 – Modulación **terminada** → siguiente: **F6 – Output Stage (+ Input Stage)**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -75,28 +75,38 @@
   CPU (`[.bench]`): cadena típica 3.7 %; cadena extrema de 8 módulos pesados (Spectral, Granular, Drone,
   Resonator, Shimmer Delay, Multi-Tap, ModFX, Saturator 4x) + core = 9.3 % de un núcleo → optimizar en F10.
 
+- **F5 – Modulación:**
+  - `Source/DSP/Modulation/`: `ModSources.h` (29 fuentes con IDs string, curvas Linear/Exp/Log/S-Curve),
+    `ModRouting.h` (slots de matriz, mapas de macros 4×8 con los valores por defecto de la spec, pasos de
+    secuenciador, formas custom de LFO), `ModulatorSources.h` (`Lfo` 8 formas/sync bloqueado a la canción/fase/
+    retrigger Free-Transport-Transient-MIDI/polaridad/smooth, `EnvFollower` input o wet, `StepSeq` con glide,
+    `Chaos` Lorenz / drunk walk), `ModulationEngine.{h,cpp}`.
+  - `Source/DSP/Analysis/InputAnalyzer.{h,cpp}`: RMS, pico, transitorios (onset), pitch (YIN), brillo
+    (estimación de centroide) → `ModContext::analysis` y fuentes del analizador.
+  - `Source/DSP/Utils/TripleBuffer.h`; `Source/Parameters/ModRoutingState.{h,cpp}` (ValueTree ↔ `ModRouting`).
+  - Procesador: `getModRouting()`, `setModSlot()`, `setMacroTarget()`, `setSeqSteps()`, `setLfoShape()` (todas
+    aceptan `UndoManager*` para F8), `getModSourceValue()` (para la GUI), lectura de MIDI, señal wet del trozo
+    anterior para los env followers "Wet".
+- **Tests: 65 casos, todos verdes** (+ LFO sincronizado cae en la fase exacta, rangos de las 8 formas, chaos y
+  step seq, analizador (onset, RMS, brillo de 1 kHz), matriz y macros dentro de rango, Mod Depth 0, routing
+  guardado/recuperado, LFO modulando la ganancia de salida en el procesador). CPU cadena típica: 4.3 %.
+
 ## A medias
 - Nada a medias.
 
 ## Siguiente paso exacto
-- **F5 – Modulación** en `Source/DSP/Modulation/` y `Source/DSP/Analysis/`:
-  1. `ModSources.h`: enum de fuentes (LFO1–8, Env1–4, Seq1–2, Chaos1–2, Macro1–4, Analyzer: RMS, transient,
-     pitch, centroid; MIDI: note, velocity, modwheel, CC) — los IDs de fuente se guardan en el estado.
-  2. `LFO` (formas sine/tri/saw/square/S&H/smooth random/custom, sync con `TempoPhase`, fase, retrigger
-     Free/Transport/Transient/MIDI, polaridad, smooth), `EnvFollower` (input/wet), `StepSeq` (pasos en el nodo
-     `SEQ` del estado), `Chaos` (Lorenz / drunk walk).
-  3. `InputAnalyzer` (RMS, detector de transitorios, `PitchTracker`, centroide espectral) → rellena
-     `ModContext::analysis` (el Comb ya lo usa en modo Track).
-  4. `ModMatrix`: 32 slots (fuente, destino = cualquier `PID` con `isModulatable()`, cantidad = `modN_amt`, curva,
-     vía) en el nodo `MODMATRIX` del estado + snapshot lock-free (triple buffer) para el audio thread. En
-     `processChunk` sustituir la copia `effective = params` por: valores base normalizados + Σ modulaciones,
-     desnormalizados con `makeRange()` (precalcular los rangos en un array).
-  5. `MacroMap`: 4 macros × 8 destinos (rango min/max por destino) en el nodo `MACROS`; mapeo por defecto de la
-     spec (HAZE/DRIFT/GRIT/BLOOM). `glob_moddepth` escala las fuentes moduladoras.
-  6. MIDI: leer el `MidiBuffer` en `processBlock` (nota, velocity, mod wheel, CC) para las fuentes MIDI y el
-     retrigger de LFOs.
-  7. Tests: LFO sincronizado a 120 BPM cae en la fase correcta, matriz modula un destino dentro de rango,
-     macros mapean, estado de la matriz se guarda/recupera.
+- **F6 – Output Stage (+ Input Stage)**:
+  1. `Source/DSP/Core/InputStage.{h,cpp}` (o `Source/DSP/Stages/`): `in_gain`, HPF `in_hpf` (20 Hz = off), LPF
+     `in_lpf` (20 kHz = off), drive previo `in_drive` (soft clip con compensación), mono-maker de graves
+     `in_bassmono` (LR4, 0 = off). Insertar en `processChunk` antes de la cadena (después de guardar el dry).
+  2. `OutputStage.{h,cpp}`: tilt EQ (`out_tilt`, pivote ~800 Hz), HPF/LPF de salida, width M/S (`out_width`),
+     glue compressor (`out_glue_*`, detector estéreo enlazado, knee suave), ducker (`out_duck*`: reduce el wet
+     según la envolvente de la entrada seca), soft clipper (`out_clip_*`), limitador de seguridad
+     (`out_limit_on`, `out_ceiling`, lookahead corto o sin lookahead para no añadir latencia), y el dry/wet + output
+     gain + bypass que hoy están provisionalmente en `AetherfallProcessor::processChunk`.
+  3. Medidores (pico/RMS entrada/salida, correlación, gain reduction) como atomics para la GUI de F7.
+  4. Tests: ducking audible (el wet baja ≥ 6 dB con la entrada fuerte y vuelve en silencio), limitador nunca supera
+     el ceiling, tilt/HPF/LPF, width 0 = mono, bypass sin clicks.
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de
@@ -106,5 +116,6 @@
   se valida en CI.
 - Ajustes de sonido pendientes de escucha real (no posible en el contenedor): niveles relativos de los módulos,
   carácter de los color modes, profundidades máximas de modulación, timbre del Drone y de las texturas.
-- CPU de la cadena extrema 9.3 % (> 8 % objetivo para preset típico; el típico está en 3.7 %). Candidatos F10:
+- CPU de la cadena extrema 9.3 % (> 8 % objetivo para preset típico; el típico está en 4.3 %). Candidatos F10:
   trig por muestra en ModFX/Stereo/Drone (usar fasores), Spectral (atan2/sin/cos por bin), Granular (ventanas).
+- MIDI CC distintos de CC1 todavía no son fuente (solo mod wheel); añadir "MIDI CC n" configurable si hace falta.

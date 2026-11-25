@@ -18,6 +18,7 @@ AetherfallProcessor::AetherfallProcessor()
 
     getChainNode();   // make sure the state nodes exist in a fresh state
     getGateNode();
+    modstate::ensureNodes (apvts.state);
     apvts.state.addListener (this);
     pushAllStateToAudio();
 }
@@ -71,10 +72,42 @@ void AetherfallProcessor::pushGatePatternToAudio()
     gatePatternBits.store (getGatePattern(), std::memory_order_release);
 }
 
+void AetherfallProcessor::pushModRoutingToAudio()
+{
+    const auto routing = modstate::read (apvts.state);
+    const juce::SpinLock::ScopedLockType lock (routingWriteLock);
+    modEngine.setRouting (routing);
+}
+
+void AetherfallProcessor::setModSlot (int slot, const ModSlot& s, juce::UndoManager* um)
+{
+    modstate::writeSlot (apvts.state, slot, s, um);
+    pushModRoutingToAudio();
+}
+
+void AetherfallProcessor::setMacroTarget (int macro, int index, const MacroTarget& t, juce::UndoManager* um)
+{
+    modstate::writeMacroTarget (apvts.state, macro, index, t, um);
+    pushModRoutingToAudio();
+}
+
+void AetherfallProcessor::setSeqSteps (int seq, const std::array<float, (size_t) seqMaxSteps>& steps, juce::UndoManager* um)
+{
+    modstate::writeSeqSteps (apvts.state, seq, steps, um);
+    pushModRoutingToAudio();
+}
+
+void AetherfallProcessor::setLfoShape (int lfo, const std::array<float, (size_t) lfoCustomPoints>& points, juce::UndoManager* um)
+{
+    modstate::writeLfoShape (apvts.state, lfo, points, um);
+    pushModRoutingToAudio();
+}
+
 void AetherfallProcessor::pushAllStateToAudio()
 {
     pushChainOrderToAudio();
     pushGatePatternToAudio();
+    pushModRoutingToAudio();
 }
 
 void AetherfallProcessor::setChainOrder (const chain::Order& order)
@@ -103,11 +136,13 @@ void AetherfallProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const
         pushChainOrderToAudio();
     else if (tree.hasType (gateNodeId) && prop == gatePatternProp)
         pushGatePatternToAudio();
+    else if (modstate::isModulationNode (tree))
+        pushModRoutingToAudio();
 }
 
 void AetherfallProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    if (child.hasType (chainNodeId) || child.hasType (gateNodeId))
+    if (child.hasType (chainNodeId) || child.hasType (gateNodeId) || modstate::isModulationNode (child))
         pushAllStateToAudio();
 }
 
@@ -136,6 +171,7 @@ void AetherfallProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     std::copy (params.data(), params.data() + numParams, effective.begin());
 
     // All stages work on control-rate chunks, so their max block is fixed.
+    modEngine.prepare (currentSampleRate);
     chain.prepare (currentSampleRate, controlBlockSize);
     core.prepare (currentSampleRate, controlBlockSize, 2);
 
@@ -174,6 +210,8 @@ void AetherfallProcessor::reset()
     chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
     chain.reset();
     core.reset();
+    modEngine.reset();
+    lastWetLength = 0;
 
     for (auto& d : dryDelay) d.reset();
     dryDelayCurrent = dryDelayPrevious = chain.getLatencySamples();
@@ -229,7 +267,24 @@ TransportState AetherfallProcessor::readTransport() const
     return t;
 }
 
-void AetherfallProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void AetherfallProcessor::handleMidi (const juce::MidiBuffer& midi)
+{
+    // Block-accurate MIDI is plenty for modulation sources / LFO retrigger.
+    for (const auto meta : midi)
+    {
+        const auto msg = meta.getMessage();
+        if (msg.isNoteOn())
+            modEngine.noteOn (msg.getNoteNumber(), msg.getFloatVelocity());
+        else if (msg.isNoteOff())
+            modEngine.noteOff (msg.getNoteNumber());
+        else if (msg.isController())
+            modEngine.controller (msg.getControllerNumber(), (float) msg.getControllerValue() / 127.0f);
+        else if (msg.isPitchWheel())
+            modEngine.pitchBend ((float) (msg.getPitchWheelValue() - 8192) / 8192.0f);
+    }
+}
+
+void AetherfallProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -247,6 +302,7 @@ void AetherfallProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         buffer.clear();
 
     const auto transport = readTransport();
+    handleMidi (midi);
 
     for (int start = 0; start < numSamples; start += controlBlockSize)
     {
@@ -261,10 +317,7 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     // 1) Control rate: snapshot host parameter values.
     params.refresh();
 
-    // 2) Modulation (F5) will write offsets on top of the host values here.
-    std::copy (params.data(), params.data() + numParams, effective.begin());
-
-    // 3) Build the context for this chunk (transport advanced to chunk start).
+    // 2) Context for this chunk (transport advanced to the chunk start).
     ModContext ctx;
     ctx.values = effective.data();
     ctx.sampleRate = currentSampleRate;
@@ -273,6 +326,18 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     ctx.gatePattern = gatePatternBits.load (std::memory_order_acquire);
     if (ctx.transport.hasPpq)
         ctx.transport.ppqPosition += (double) start / currentSampleRate * (ctx.transport.bpm / 60.0);
+
+    // 3) Modulation: host values + macros + matrix -> effective values.
+    ModulationEngine::ChunkInput modIn;
+    modIn.inL = io.getReadPointer (0, start);
+    modIn.inR = io.getReadPointer (1, start);
+    modIn.wetL = lastWetLength >= length ? lastWet[0].data() : nullptr;
+    modIn.wetR = lastWetLength >= length ? lastWet[1].data() : nullptr;
+    modIn.numSamples = length;
+    modIn.sampleRate = currentSampleRate;
+    modIn.transport = ctx.transport;
+    modEngine.process (params.data(), effective.data(), modIn);
+    ctx.analysis = modEngine.getAnalysis();
 
     // 4) Keep the dry signal for the dry/wet and bypass crossfades, delayed by
     //    the chain latency so dry and wet stay aligned.
@@ -308,6 +373,11 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
     chain.process (chunk, ctx);
     core.process (chunk, ctx);
+
+    // Keep the wet signal for the "Wet" envelope followers of the next chunk.
+    for (int ch = 0; ch < 2; ++ch)
+        std::copy_n (chunk.getReadPointer (ch), length, lastWet[(size_t) ch].data());
+    lastWetLength = length;
 
     // The chain latency may change when its order changes (Spectral added or
     // removed). Applied from the next chunk on.
@@ -361,6 +431,7 @@ void AetherfallProcessor::setStateInformation (const void* data, int sizeInBytes
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             getChainNode();
             getGateNode();
+            modstate::ensureNodes (apvts.state);
             pushAllStateToAudio();
         }
 }
