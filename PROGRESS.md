@@ -3,7 +3,7 @@
 > Este archivo es la memoria entre sesiones. Actualizar SIEMPRE antes de cerrar una sesión.
 
 ## Estado actual
-- **Fase:** F5 – Modulación **terminada** → siguiente: **F6 – Output Stage (+ Input Stage)**.
+- **Fase:** F6 – Output Stage (+ Input Stage) **terminada** → siguiente: **F7 – GUI base**.
 - Última actualización: 2026-11-25 (sesión 1).
 
 ## Terminado
@@ -91,22 +91,38 @@
   step seq, analizador (onset, RMS, brillo de 1 kHz), matriz y macros dentro de rango, Mod Depth 0, routing
   guardado/recuperado, LFO modulando la ganancia de salida en el procesador). CPU cadena típica: 4.3 %.
 
+- **F6 – Input / Output Stage:**
+  - `Source/DSP/Core/InputStage.{h,cpp}`: gain, HPF/LPF (Off en los extremos, con fundido), bass mono LR4,
+    pre-drive. Procesa solo el camino wet.
+  - `Source/DSP/Core/OutputStage.{h,cpp}`: tilt, HPF/LPF, width, glue compressor, ducker (por la entrada seca
+    alineada), dry/wet, soft clipper, output gain, limitador de seguridad, bypass; sustituye a la etapa provisional.
+  - `Source/DSP/Utils/Meters.h`: `Meters` (atomics: pico/RMS in/out, correlación, GR glue/duck/limiter) +
+    `LevelMeter`; `AetherfallProcessor::getMeters()`.
+  - Flujo final del procesador por trozo: parámetros → modulación → dry (retrasado por latencia) → medidores de
+    entrada → InputStage → FXChain → ATMOS CORE → OutputStage (+ medidores de salida).
+- **Tests: 71 casos, todos verdes** (+ ducking > 6 dB y recuperación total, limitador ≤ ceiling con +12 dB,
+  glue > 10 dB de reducción, tilt/HPF/LPF/width, input HPF/bass mono/gain, procesador nunca supera −0.3 dBFS).
+
 ## A medias
-- Nada a medias.
+- Nada a medias. El DSP de las fases F1–F6 está completo; falta toda la GUI real (F7–F8) y los presets (F9).
 
 ## Siguiente paso exacto
-- **F6 – Output Stage (+ Input Stage)**:
-  1. `Source/DSP/Core/InputStage.{h,cpp}` (o `Source/DSP/Stages/`): `in_gain`, HPF `in_hpf` (20 Hz = off), LPF
-     `in_lpf` (20 kHz = off), drive previo `in_drive` (soft clip con compensación), mono-maker de graves
-     `in_bassmono` (LR4, 0 = off). Insertar en `processChunk` antes de la cadena (después de guardar el dry).
-  2. `OutputStage.{h,cpp}`: tilt EQ (`out_tilt`, pivote ~800 Hz), HPF/LPF de salida, width M/S (`out_width`),
-     glue compressor (`out_glue_*`, detector estéreo enlazado, knee suave), ducker (`out_duck*`: reduce el wet
-     según la envolvente de la entrada seca), soft clipper (`out_clip_*`), limitador de seguridad
-     (`out_limit_on`, `out_ceiling`, lookahead corto o sin lookahead para no añadir latencia), y el dry/wet + output
-     gain + bypass que hoy están provisionalmente en `AetherfallProcessor::processChunk`.
-  3. Medidores (pico/RMS entrada/salida, correlación, gain reduction) como atomics para la GUI de F7.
-  4. Tests: ducking audible (el wet baja ≥ 6 dB con la entrada fuerte y vuelve en silencio), limitador nunca supera
-     el ceiling, tilt/HPF/LPF, width 0 = mono, bypass sin clicks.
+- **F7 – GUI base** (`Source/GUI/`), sustituyendo el editor provisional:
+  1. `LookAndFeel/AetherLookAndFeel.{h,cpp}`: paleta oscura, color de acento (por categoría de preset), knobs
+     vectoriales (arco + valor), botones, combos, tabs; fuentes del sistema (o una fuente embebida vía
+     `juce_add_binary_data` más adelante).
+  2. `Components/`: `Knob` (Slider rotatorio + label + valor, doble clic = default, Ctrl/Cmd+arrastre = fino,
+     tooltip; adjunto al APVTS con `SliderAttachment`), `MacroKnob` (grande), `Toggle`, `ChoiceBox`,
+     `SlotView` (un slot de la cadena: tipo, on, mix, solo, parallel, expandible con los parámetros del módulo
+     generados desde `moduleInfos[...].firstParam..lastParam`), `Meters` (lee `getMeters()` con un Timer 30 Hz).
+  3. `Views/`: `MainView` (4 macros, Dry/Wet, Width, Ducking, Output, zona central reservada para el visualizador
+     de F8), `ChainView` (8 slots en fila, drag & drop para reordenar → `setChainOrder()`), `CoreView` (todos los
+     parámetros `core_*`), `OutputView` (`in_*` + `out_*` + medidores). La vista MOD llega en F8.
+  4. `PluginEditor`: barra superior (logo, tabs, selector de preset placeholder, A/B y undo en F8), redimensionable
+     75–200 % con `setResizeLimits` + `AffineTransform`/escalado de layout, tamaño base 1000×640, guardar la
+     escala en el estado (`UI` node).
+  5. Probar en Standalone (Xvfb en el contenedor para capturas: `apt-get install xvfb`) — capturas con
+     `juce::Component::createComponentSnapshot` en un test oculto `[.gui]` si no hay display.
 
 ## Bugs conocidos / pendientes
 - El job de **macOS** del CI se cancela al instante sin logs (probablemente la cuenta no tiene minutos de

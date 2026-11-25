@@ -6,6 +6,9 @@
 #include "Parameters/ParamLayout.h"
 #include "DSP/Chain/ModContext.h"
 #include "DSP/Core/AtmosCore.h"
+#include "DSP/Core/InputStage.h"
+#include "DSP/Core/OutputStage.h"
+#include "DSP/Utils/Meters.h"
 #include "DSP/Chain/FXChain.h"
 #include "DSP/Chain/ChainOrder.h"
 #include "DSP/Modulation/ModulationEngine.h"
@@ -87,6 +90,9 @@ public:
     void setSeqSteps (int seq, const std::array<float, (size_t) seqMaxSteps>& steps, juce::UndoManager* um = nullptr);
     void setLfoShape (int lfo, const std::array<float, (size_t) lfoCustomPoints>& points, juce::UndoManager* um = nullptr);
 
+    /** Level meters and gain reductions (GUI). */
+    const Meters& getMeters() const noexcept { return meters; }
+
     /** Live modulation source values (GUI meters / rings). */
     float getModSourceValue (ModSource s) const noexcept { return modEngine.getSourceValue (s); }
 
@@ -142,9 +148,10 @@ private:
     int reportedLatency = 0;
     void updateLatency (int newLatency);
 
-    // Provisional output stage (dry/wet, gain, bypass) until the full Output
-    // Stage of phase F6 replaces it.
-    dsp::LinearSmoother<float> outDryGain, outWetGain, outGain, bypassMix;
+    InputStage inputStage;
+    OutputStage outputStage;
+    Meters meters;
+    LevelMeter inMeter;
 
     double currentSampleRate = 48000.0;
     int maxBlockSize = 512;

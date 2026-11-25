@@ -153,3 +153,13 @@ Formato: fecha · decisión · motivo.
 - **Decisión:** nota, velocity, mod wheel (CC1) y pitch bend se leen una vez por bloque del host; el note-on
   dispara el retrigger "MIDI Note" de los LFOs.
 - **Motivo:** para fuentes de modulación y retrigger la precisión de bloque es suficiente y mucho más simple.
+
+### 2026-11-25 · Input / Output Stage (F6)
+- **Decisión:** `InputStage` acondiciona solo el camino wet (la señal seca del dry/wet final queda intacta).
+  `OutputStage`: wet → tilt (shelves ±tilt/2 a 800 Hz) → HPF/LPF → width → glue (pico enlazado, knee 6 dB,
+  ataque/release sobre la reducción) → ducker (envolvente de la entrada seca ALINEADA con el wet, hasta −30 dB)
+  → dry/wet equal-power → soft clipper (lineal hasta 0.8 ≈ −1.9 dBFS) → output gain → limitador de seguridad sin
+  lookahead (ataque instantáneo, release 80 ms, recorte duro final al ceiling) → bypass. Filtros en "Off" se
+  desvanecen (sin desfase). Medidores en `Meters` (atomics) para la GUI.
+- **Motivo:** el limitador sin lookahead no añade latencia y garantiza el techo (verificado por test); el ducker
+  sobre la señal seca alineada mantiene la coherencia cuando el Spectral añade latencia.

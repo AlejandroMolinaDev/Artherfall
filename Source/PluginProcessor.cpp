@@ -174,9 +174,9 @@ void AetherfallProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     modEngine.prepare (currentSampleRate);
     chain.prepare (currentSampleRate, controlBlockSize);
     core.prepare (currentSampleRate, controlBlockSize, 2);
-
-    for (auto* sm : { &outDryGain, &outWetGain, &outGain, &bypassMix })
-        sm->prepare (currentSampleRate, 0.03);
+    inputStage.prepare (currentSampleRate, controlBlockSize, 2);
+    outputStage.prepare (currentSampleRate, controlBlockSize, 2);
+    inMeter.prepare (currentSampleRate);
 
     for (auto& d : dryDelay)
         d.prepare (FXChain::maxModuleLatency * 2 + controlBlockSize);
@@ -219,11 +219,9 @@ void AetherfallProcessor::reset()
     reportedLatency = dryDelayCurrent;
     setLatencySamples (reportedLatency);
 
-    const float mix = params.load (PID::OutMix);
-    outDryGain.setCurrentAndTarget (std::cos (mix * juce::MathConstants<float>::halfPi));
-    outWetGain.setCurrentAndTarget (std::sin (mix * juce::MathConstants<float>::halfPi));
-    outGain.setCurrentAndTarget (juce::Decibels::decibelsToGain (params.load (PID::OutGain)));
-    bypassMix.setCurrentAndTarget (params.load (PID::Bypass) >= 0.5f ? 1.0f : 0.0f);
+    inputStage.reset();
+    outputStage.reset();
+    inMeter.reset();
 }
 
 bool AetherfallProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -366,10 +364,21 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     }
     dryDelayFade.skip (length);
 
+    // Input meters (raw input).
+    {
+        float pl = 0.0f, pr = 0.0f;
+        inMeter.process (io.getReadPointer (0, start), io.getReadPointer (1, start), length, pl, pr);
+        meters.inPeakL.store (pl, std::memory_order_relaxed);
+        meters.inPeakR.store (pr, std::memory_order_relaxed);
+        meters.inRmsL.store (inMeter.rmsL(), std::memory_order_relaxed);
+        meters.inRmsR.store (inMeter.rmsR(), std::memory_order_relaxed);
+    }
+
     // A view of the chunk (2 channels: no heap allocation).
     juce::AudioBuffer<float> chunk (io.getArrayOfWritePointers(), 2, start, length);
 
-    // 5) DSP stages: [input stage F6] -> FX chain -> ATMOS CORE -> output.
+    // 5) Wet path: input stage -> FX chain -> ATMOS CORE.
+    inputStage.process (chunk, ctx);
     chain.setRequestedOrder (chainOrderPacked.load (std::memory_order_acquire));
     chain.process (chunk, ctx);
     core.process (chunk, ctx);
@@ -383,28 +392,9 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     // removed). Applied from the next chunk on.
     updateLatency (chain.getLatencySamples());
 
-    // 6) Provisional output stage: dry/wet, output gain, bypass.
-    const float mix = ctx.get (PID::OutMix);
-    outDryGain.setTarget (std::cos (mix * juce::MathConstants<float>::halfPi));
-    outWetGain.setTarget (std::sin (mix * juce::MathConstants<float>::halfPi));
-    outGain.setTarget (juce::Decibels::decibelsToGain (ctx.get (PID::OutGain)));
-    bypassMix.setTarget (ctx.getBool (PID::Bypass) ? 1.0f : 0.0f);
-
-    float* L = chunk.getWritePointer (0);
-    float* R = chunk.getWritePointer (1);
-    const float* dL = dryChunk[0].data();
-    const float* dR = dryChunk[1].data();
-
-    for (int i = 0; i < length; ++i)
-    {
-        const float dg = outDryGain.next(), wg = outWetGain.next();
-        const float og = outGain.next(), bp = bypassMix.next();
-
-        const float l = (dg * dL[i] + wg * L[i]) * og;
-        const float r = (dg * dR[i] + wg * R[i]) * og;
-        L[i] = l + bp * (dL[i] - l);
-        R[i] = r + bp * (dR[i] - r);
-    }
+    // 6) Output stage: wet processing, ducking, dry/wet, clipper, gain,
+    //    safety limiter, bypass and output meters.
+    outputStage.process (chunk, dryChunk[0].data(), dryChunk[1].data(), ctx, &meters);
 }
 
 //==============================================================================
