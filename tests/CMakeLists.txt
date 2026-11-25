@@ -29,6 +29,12 @@ target_link_libraries(AetherfallTests PRIVATE
 # which provides fallbacks, so no extra definitions are needed here.
 target_compile_definitions(AetherfallTests PRIVATE AETHERFALL_TESTS=1)
 
+# Tests compare floats exactly on purpose (e.g. smoother end values).
+# Source-level options come after the interface warning flags, so they win.
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(${AETHERFALL_TEST_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-float-equal")
+endif()
+
 include("${catch2_SOURCE_DIR}/extras/Catch.cmake")
 catch_discover_tests(AetherfallTests
     DISCOVERY_MODE PRE_TEST

@@ -4,7 +4,7 @@
 // Product identity. Kept independent from the JucePlugin_* macros so the same
 // sources compile in the plug-in targets and in the headless test runner.
 // -----------------------------------------------------------------------------
-namespace aetherfall::info
+namespace aetherfall::product
 {
     inline constexpr const char* name = "AETHERFALL";
     inline constexpr const char* company = "Aetherfall Audio";

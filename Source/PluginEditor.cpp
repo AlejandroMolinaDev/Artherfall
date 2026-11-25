@@ -31,11 +31,11 @@ void AetherfallEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xffb9c6ff));
     g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    g.drawText (info::name, header.reduced (20, 0), juce::Justification::centredLeft);
+    g.drawText (product::name, header.reduced (20, 0), juce::Justification::centredLeft);
 
     g.setColour (juce::Colours::white.withAlpha (0.45f));
     g.setFont (juce::FontOptions (13.0f));
-    g.drawText (juce::String ("v") + info::version + "  -  dev build (GUI arrives in F7)",
+    g.drawText (juce::String ("v") + product::version + "  -  dev build (GUI arrives in F7)",
                 header.reduced (20, 0), juce::Justification::centredRight);
 }
 

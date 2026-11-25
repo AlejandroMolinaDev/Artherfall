@@ -2,6 +2,10 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "Parameters/ParamIDs.h"
+#include "Parameters/ParamLayout.h"
+#include "DSP/Chain/ModContext.h"
+
 namespace aetherfall
 {
 
@@ -32,6 +36,8 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override;
 
+    juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
+
     //==========================================================================
     int getNumPrograms() override                         { return 1; }
     int getCurrentProgram() override                      { return 0; }
@@ -45,8 +51,23 @@ public:
 
     juce::AudioProcessorValueTreeState& getValueTreeState() noexcept { return apvts; }
 
+    /** Samples per control-rate chunk: parameters/modulation are evaluated once
+        per chunk, so behaviour does not depend on the host buffer size. */
+    static constexpr int controlBlockSize = 64;
+
 private:
+    TransportState readTransport() const;
+    void processChunk (juce::AudioBuffer<float>& io, int start, int length, const TransportState&);
+
     juce::AudioProcessorValueTreeState apvts;
+    ParameterCache params;
+    juce::AudioProcessorParameter* bypassParam = nullptr;
+
+    /** Effective (modulated) parameter values for the current chunk. */
+    std::array<float, (size_t) numParams> effective {};
+
+    double currentSampleRate = 48000.0;
+    int maxBlockSize = 512;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AetherfallProcessor)
 };
