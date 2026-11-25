@@ -11,6 +11,11 @@
 #include "ShimmerDelay.h"
 #include "MultiTap.h"
 #include "Comb.h"
+#include "TranceGate.h"
+#include "ReverseSwell.h"
+#include "TextureLayer.h"
+#include "LoFiTape.h"
+#include "ResonatorBank.h"
 
 namespace aetherfall
 {
@@ -49,14 +54,14 @@ std::unique_ptr<IModule> createModule (ModuleType type)
         case ModuleType::ShimmerDelay: return std::make_unique<ShimmerDelay>();
         case ModuleType::MultiTap:   return std::make_unique<MultiTap>();
         case ModuleType::Comb:       return std::make_unique<Comb>();
+        case ModuleType::Gate:       return std::make_unique<TranceGate>();
+        case ModuleType::ReverseSwell: return std::make_unique<ReverseSwell>();
+        case ModuleType::Texture:    return std::make_unique<TextureLayer>();
+        case ModuleType::LoFi:       return std::make_unique<LoFiTape>();
+        case ModuleType::Resonator:  return std::make_unique<ResonatorBank>();
 
         case ModuleType::Spectral:
         case ModuleType::Drone:
-        case ModuleType::Resonator:
-        case ModuleType::Gate:
-        case ModuleType::ReverseSwell:
-        case ModuleType::Texture:
-        case ModuleType::LoFi:
         case ModuleType::None:
         case ModuleType::Count:
             break;
@@ -69,7 +74,9 @@ bool isModuleImplemented (ModuleType type) noexcept
     constexpr ModuleType implemented[] = {
         ModuleType::Granular, ModuleType::TapeDelay, ModuleType::Filter,
         ModuleType::Saturator, ModuleType::Stereo, ModuleType::Bitcrush, ModuleType::RingFreq,
-        ModuleType::ModFX, ModuleType::ShimmerDelay, ModuleType::MultiTap, ModuleType::Comb
+        ModuleType::ModFX, ModuleType::ShimmerDelay, ModuleType::MultiTap, ModuleType::Comb,
+        ModuleType::Gate, ModuleType::ReverseSwell, ModuleType::Texture, ModuleType::LoFi,
+        ModuleType::Resonator
     };
 
     for (auto t : implemented)

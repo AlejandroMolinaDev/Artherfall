@@ -68,6 +68,13 @@ public:
     static inline const juce::Identifier chainNodeId { "CHAIN" };
     static inline const juce::Identifier chainOrderProp { "order" };
 
+    // Trance Gate pattern (16 steps, bit 0 = step 1), stored in the GATE node.
+    void setGatePattern (std::uint32_t pattern);
+    std::uint32_t getGatePattern() const;
+
+    static inline const juce::Identifier gateNodeId { "GATE" };
+    static inline const juce::Identifier gatePatternProp { "pattern" };
+
     /** Samples per control-rate chunk: parameters/modulation are evaluated once
         per chunk, so behaviour does not depend on the host buffer size. */
     static constexpr int controlBlockSize = 64;
@@ -76,7 +83,10 @@ private:
     TransportState readTransport() const;
 
     juce::ValueTree getChainNode();
+    juce::ValueTree getGateNode();
     void pushChainOrderToAudio();
+    void pushGatePatternToAudio();
+    void pushAllStateToAudio();
 
     // ValueTree::Listener — keeps the audio-thread mirror in sync with the
     // state (GUI edits, undo/redo, preset/project loading).
@@ -96,6 +106,7 @@ private:
     FXChain chain;
     AtmosCore core;
     std::atomic<std::uint64_t> chainOrderPacked { 0 };
+    std::atomic<std::uint32_t> gatePatternBits { 0xFFFFu };
 
     // Dry copy of the current chunk (for dry/wet and bypass).
     std::array<std::array<float, controlBlockSize>, 2> dryChunk {};

@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "PluginInfo.h"
+#include "DSP/Modules/TranceGate.h"
 
 namespace aetherfall
 {
@@ -15,9 +16,10 @@ AetherfallProcessor::AetherfallProcessor()
     bypassParam = apvts.getParameter (juce::String (std::string (info (PID::Bypass).id)));
     jassert (bypassParam != nullptr);
 
-    getChainNode();   // make sure the node exists in a fresh state
+    getChainNode();   // make sure the state nodes exist in a fresh state
+    getGateNode();
     apvts.state.addListener (this);
-    pushChainOrderToAudio();
+    pushAllStateToAudio();
 }
 
 AetherfallProcessor::~AetherfallProcessor()
@@ -36,6 +38,43 @@ juce::ValueTree AetherfallProcessor::getChainNode()
         apvts.state.appendChild (node, nullptr);
     }
     return node;
+}
+
+juce::ValueTree AetherfallProcessor::getGateNode()
+{
+    auto node = apvts.state.getChildWithName (gateNodeId);
+    if (! node.isValid())
+    {
+        node = juce::ValueTree (gateNodeId);
+        node.setProperty (gatePatternProp, (int) TranceGate::defaultPattern, nullptr);
+        apvts.state.appendChild (node, nullptr);
+    }
+    return node;
+}
+
+void AetherfallProcessor::setGatePattern (std::uint32_t pattern)
+{
+    getGateNode().setProperty (gatePatternProp, (int) (pattern & 0xFFFFu), nullptr);
+    pushGatePatternToAudio();
+}
+
+std::uint32_t AetherfallProcessor::getGatePattern() const
+{
+    const auto node = apvts.state.getChildWithName (gateNodeId);
+    if (! node.isValid() || ! node.hasProperty (gatePatternProp))
+        return TranceGate::defaultPattern;
+    return (std::uint32_t) (int) node.getProperty (gatePatternProp) & 0xFFFFu;
+}
+
+void AetherfallProcessor::pushGatePatternToAudio()
+{
+    gatePatternBits.store (getGatePattern(), std::memory_order_release);
+}
+
+void AetherfallProcessor::pushAllStateToAudio()
+{
+    pushChainOrderToAudio();
+    pushGatePatternToAudio();
 }
 
 void AetherfallProcessor::setChainOrder (const chain::Order& order)
@@ -62,17 +101,19 @@ void AetherfallProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const
 {
     if (tree.hasType (chainNodeId) && prop == chainOrderProp)
         pushChainOrderToAudio();
+    else if (tree.hasType (gateNodeId) && prop == gatePatternProp)
+        pushGatePatternToAudio();
 }
 
 void AetherfallProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    if (child.hasType (chainNodeId))
-        pushChainOrderToAudio();
+    if (child.hasType (chainNodeId) || child.hasType (gateNodeId))
+        pushAllStateToAudio();
 }
 
 void AetherfallProcessor::valueTreeRedirected (juce::ValueTree&)
 {
-    pushChainOrderToAudio();
+    pushAllStateToAudio();
 }
 
 const juce::String AetherfallProcessor::getName() const { return product::name; }
@@ -201,6 +242,7 @@ void AetherfallProcessor::processChunk (juce::AudioBuffer<float>& io, int start,
     ctx.sampleRate = currentSampleRate;
     ctx.numSamples = length;
     ctx.transport = blockTransport;
+    ctx.gatePattern = gatePatternBits.load (std::memory_order_acquire);
     if (ctx.transport.hasPpq)
         ctx.transport.ppqPosition += (double) start / currentSampleRate * (ctx.transport.bpm / 60.0);
 
@@ -263,7 +305,8 @@ void AetherfallProcessor::setStateInformation (const void* data, int sizeInBytes
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             getChainNode();
-            pushChainOrderToAudio();
+            getGateNode();
+            pushAllStateToAudio();
         }
 }
 

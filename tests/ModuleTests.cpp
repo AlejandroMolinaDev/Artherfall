@@ -353,3 +353,119 @@ TEST_CASE ("ModFX: every mode produces a signal", "[modules]")
         REQUIRE (rms (out, 12000) > 0.1);
     }
 }
+
+TEST_CASE ("Trance Gate follows the pattern in time with the host", "[modules]")
+{
+    auto gate = createModule (ModuleType::Gate);
+    gate->prepare (48000.0, 64, 2);
+
+    ParamSet ps;
+    ps.set (PID::GateDiv, 2.0f).set (PID::GateSteps, 16.0f).set (PID::GateSwing, 0.0f)
+      .set (PID::GateSmooth, 0.0f).set (PID::GateDepth, 1.0f);
+
+    juce::AudioBuffer<float> buf (2, 64);
+    ModContext ctx;
+    ctx.values = ps.v.data();
+    ctx.sampleRate = 48000.0;
+    ctx.numSamples = 64;
+    ctx.transport.bpm = 120.0;
+    ctx.transport.isPlaying = true;
+    ctx.transport.hasPpq = true;
+    ctx.gatePattern = 0x5555u;   // steps 1, 3, 5... open
+
+    // 1/16 at 120 BPM = 6000 samples per step.
+    std::vector<float> out;
+    for (int start = 0; start < 6000 * 4; start += 64)
+    {
+        ctx.transport.ppqPosition = (double) start / 48000.0 * 2.0;
+        for (int i = 0; i < 64; ++i) { buf.setSample (0, i, 1.0f); buf.setSample (1, i, 1.0f); }
+        gate->process (buf, ctx);
+        for (int i = 0; i < 64; ++i) out.push_back (buf.getSample (0, i));
+    }
+
+    REQUIRE (out[3000] > 0.99f);    // step 1 open
+    REQUIRE (out[9000] < 0.01f);    // step 2 closed
+    REQUIRE (out[15000] > 0.99f);   // step 3 open
+    REQUIRE (out[21000] < 0.01f);   // step 4 closed
+}
+
+TEST_CASE ("Reverse Swell plays audio backwards", "[modules]")
+{
+    ParamSet ps;
+    ps.set (PID::RevSync, 0.0f).set (PID::RevLength, 200.0f).set (PID::RevXfade, 0.0f)
+      .set (PID::RevFeedback, 0.0f).set (PID::RevMode, 0.0f);
+
+    auto m = createModule (ModuleType::ReverseSwell);
+    m->prepare (48000.0, 64, 2);
+    std::vector<float> out;
+    // Rising ramp: played backwards it falls.
+    runModule (*m, ps, 48000.0, 48000, [] (int n) { return (float) n / 48000.0f; },
+               [&] (int, float l, float) { out.push_back (l); });
+
+    int falling = 0, total = 0;
+    for (size_t i = 24000; i < out.size(); ++i)
+    {
+        const float d = out[i] - out[i - 1];
+        if (std::abs (d) > 1.0e-7f) { ++total; falling += d < 0.0f ? 1 : 0; }
+    }
+    INFO ("falling fraction " << (double) falling / total);
+    REQUIRE ((double) falling / total > 0.6);
+}
+
+TEST_CASE ("Texture Layer: adds noise, Follow gates it with the input", "[modules]")
+{
+    auto m = createModule (ModuleType::Texture);
+    m->prepare (48000.0, 64, 2);
+
+    for (int type = 0; type < 5; ++type)
+    {
+        ParamSet ps;
+        ps.set (PID::TexType, (float) type).set (PID::TexLevel, -12.0f).set (PID::TexFollow, 0.0f);
+        m->reset();
+        std::vector<float> out;
+        runModule (*m, ps, 48000.0, 48000, [] (int) { return 0.0f; }, [&] (int, float l, float) { out.push_back (l); });
+        INFO ("type " << type);
+        REQUIRE (rms (out, 24000) > 0.003);
+
+        ps.set (PID::TexFollow, 1.0f);
+        m->reset();
+        out.clear();
+        runModule (*m, ps, 48000.0, 48000, [] (int) { return 0.0f; }, [&] (int, float l, float) { out.push_back (l); });
+        REQUIRE (rms (out, 24000) < 1.0e-4);
+    }
+}
+
+TEST_CASE ("Lo-Fi Tape loses highs as Tone goes up", "[modules]")
+{
+    auto m = createModule (ModuleType::LoFi);
+    m->prepare (48000.0, 64, 2);
+    auto level = [&] (float tone)
+    {
+        ParamSet ps;
+        ps.set (PID::LofiTone, tone).set (PID::LofiNoise, 0.0f).set (PID::LofiWobble, 0.0f)
+          .set (PID::LofiSat, 0.0f).set (PID::LofiComp, 0.0f);
+        m->reset();
+        std::vector<float> out;
+        runModule (*m, ps, 48000.0, 24000, [] (int n) { return 0.2f * std::sin (2.0f * 3.14159265f * 8000.0f * (float) n / 48000.0f); },
+                   [&] (int, float l, float) { out.push_back (l); });
+        return rms (out, 12000);
+    };
+    REQUIRE (level (1.0f) < level (0.0f) * 0.2);
+}
+
+TEST_CASE ("Resonator Bank rings after an impulse", "[modules]")
+{
+    ParamSet ps;
+    ps.set (PID::ResoDecay, 2.0f).set (PID::ResoBright, 0.8f);
+    const auto out = runImpulse (ModuleType::Resonator, ps, 48000);
+    // With a 2 s ring time the level 0.5..1 s after the hit is only ~20 dB
+    // below the first quarter second.
+    std::vector<float> early (out.begin(), out.begin() + 12000);
+    std::vector<float> late (out.begin() + 24000, out.end());
+    INFO ("early " << rms (early) << " late " << rms (late));
+    REQUIRE (rms (early) > 1.0e-4);
+    REQUIRE (rms (late) > 0.05 * rms (early));
+    float peak = 0.0f;
+    for (float v : out) peak = std::max (peak, std::abs (v));
+    REQUIRE (peak < 4.0f);
+}

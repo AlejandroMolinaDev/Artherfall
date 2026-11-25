@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
 #include "Parameters/ParamIDs.h"
 #include "Parameters/NoteDivision.h"
 
@@ -43,6 +44,9 @@ struct ModContext
     int numSamples = 0;               // samples in this chunk
     TransportState transport;
     AnalysisFrame analysis;
+
+    /** Trance Gate pattern: bit i = step i+1 is open (state, not a parameter). */
+    std::uint32_t gatePattern = 0xFFFFu;
 
     float get (PID p) const noexcept      { return values[idx (p)]; }
     bool  getBool (PID p) const noexcept  { return values[idx (p)] >= 0.5f; }
